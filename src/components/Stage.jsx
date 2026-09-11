@@ -12,12 +12,12 @@
 
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
-import { cellHeightFor, drawChart, drawGrid } from '../lib/draw.js'
+import { cellHeightFor, drawChart, drawGrid, drawProgressMask, strokeCellRect } from '../lib/draw.js'
 
 const MIN_CELL = 2
 const MAX_CANVAS = 4096
 
-export default function Stage({ chart, view, setView, showGrid, showRulers, fullBleed }) {
+export default function Stage({ chart, view, setView, showGrid, showRulers, fullBleed, mask, marker }) {
   const wrapRef = useRef(null)
   const chartRef = useRef(null)
   const gridRef = useRef(null)
@@ -50,6 +50,19 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
         ctx.imageSmoothingEnabled = false
         ctx.clearRect(0, 0, backingW, backingH)
         drawChart(ctx, chart, { width: backingW, height: backingH })
+        if (mask) {
+          // On the chart canvas, not the grid one: the wash is made of cells and should
+          // scale with them. A hairline outline must not, which is why the marker below
+          // goes on the viewport-sized canvas instead.
+          const style = getComputedStyle(document.documentElement)
+          drawProgressMask(ctx, chart, {
+            width: backingW,
+            height: backingH,
+            mask,
+            worked: style.getPropertyValue('--made-worked').trim() || 'rgba(255,255,255,0.62)',
+            ahead: style.getPropertyValue('--made-ahead').trim() || 'rgba(0,0,0,0.34)',
+          })
+        }
       }
 
       const grid = gridRef.current
@@ -67,12 +80,22 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
             bold: style.getPropertyValue('--grid-bold').trim() || 'rgba(0,0,0,0.42)',
           })
         }
+        if (marker) {
+          const style = getComputedStyle(document.documentElement)
+          strokeCellRect(ctx, chart, {
+            width: displayW,
+            height: displayH,
+            rect: marker,
+            colour: style.getPropertyValue('--accent').trim() || '#2b7977',
+            lineWidth: 3,
+          })
+        }
       }
     })
     return () => {
       if (frame.current) cancelAnimationFrame(frame.current)
     }
-  }, [chart, backingW, backingH, displayW, displayH, showGrid])
+  }, [chart, backingW, backingH, displayW, displayH, showGrid, mask, marker])
 
   // Pinch and ctrl-wheel zoom, which is what a tablet user reaches for first.
   useEffect(() => {
@@ -100,7 +123,9 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
     <div className="relative flex min-h-0 flex-1 flex-col gap-2">
       <div
         ref={wrapRef}
-        className="stage relative flex min-h-0 flex-1 items-center justify-center p-4"
+        /* Stacked, `flex-1` has no height to be a fraction of, so the stage needs a
+           floor of its own or it collapses behind the panels below it. */
+        className="stage relative flex min-h-[55vh] flex-1 items-center justify-center p-4 lg:min-h-0"
         style={fullBleed ? { borderRadius: 0 } : undefined}
       >
         <div className="relative" style={{ width: displayW, height: displayH }}>

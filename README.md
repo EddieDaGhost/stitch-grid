@@ -4,8 +4,9 @@ Turn a photo into a crochet chart that comes out the right shape.
 
 Drop in a picture, and you get a graphgan chart: a grid of yarn colours, a printable
 pattern with the stitches numbered, a colour key with rough yarn amounts, and row-by-row
-instructions. Everything happens in your browser — the picture is never uploaded
-anywhere, and the whole thing keeps working with no signal.
+instructions. Then it keeps your place while you crochet it. Everything happens in your
+browser — the picture is never uploaded anywhere, and the whole thing keeps working with
+no signal.
 
 ---
 
@@ -51,6 +52,18 @@ gauge, so what you see is the shape you'll end up holding.
 - Keep a colour you care about, or ban one you don't have
 - Stray single stitches tidied away — each one costs a join, a cut and two woven ends
 
+**Making it**
+- A **row tracker**: the current row, big, with each colour run as its own line and the
+  stitch numbers it covers
+- Tick off a colour run at a time, or call the whole row done
+- The chart dims behind you as you go, so you can find your place from across the room
+  without reading a number
+- Your place is kept per chart, so closing the tab and coming back tomorrow puts you on
+  the row you left. Change the design and you get a new chart, and a fresh row 1
+- How far in you are, in stitches and in colour changes still to come — not in minutes,
+  because nobody can honestly tell you that
+- Keeps the screen awake, because a row takes minutes and both hands are full
+
 **Taking it with you**
 - **Printable PDF**: the chart across as many sheets as it needs, numbered so they tape
   together, with a letter in every cell so it survives a black-and-white printer, the
@@ -89,13 +102,17 @@ environment variables.
 Everything is a pure function of one value:
 
 ```
-source picture + settings  ──buildChart()──▶  Chart  ──▶  preview, PNG, PDF,
-                                                          legend, yarn, pattern, C2C
+source picture + settings  ──buildChart()──▶  Chart  ──▶  preview, PNG, PDF, legend,
+                                                          yarn, pattern, C2C, progress
 ```
 
-Four modules touch the DOM (`image`, `png`, `download`, `storage`). Everything else runs
-in bare Node, which is why about 85% of the logic — including the entire hand-rolled PDF
-writer — is covered by a test suite that needs no browser.
+The row tracker is no exception: it reads the same `Chart` as everything else, which is
+why switching to it cannot change a stitch, and why it works on a corner-to-corner
+reading for free.
+
+Five modules touch the DOM (`image`, `png`, `download`, `storage`, `wakelock`).
+Everything else runs in bare Node, which is why about 85% of the logic — including the
+entire hand-rolled PDF writer — is covered by a test suite that needs no browser.
 
 There are three runtime dependencies: React, React DOM and an icon set. The PDF writer is
 hand-rolled rather than pulled in, because the app is precached for offline use and a

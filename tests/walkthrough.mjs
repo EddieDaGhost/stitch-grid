@@ -178,5 +178,111 @@ export default async function run({ page, check, errors, URL }) {
   await page.waitForTimeout(200)
   check('going back to design restores the controls', await page.getByLabel('Maximum colours', { exact: true }).isVisible())
 
+  // --- making mode: the half of the job that happens after the PDF
+  await page.getByLabel('Make mode').click()
+  await page.waitForTimeout(250)
+
+  const rowPanel = page.getByLabel('Current row')
+  check('making mode shows the row you are on', await rowPanel.isVisible())
+  check('starting at row 1', /Row 1\b/.test(await rowPanel.innerText()))
+  check(
+    'and says which side it is and which way it runs',
+    /RS/.test(await rowPanel.innerText()),
+    await rowPanel.innerText(),
+  )
+
+  // Switching to making mode must not touch the design — it reads the same Chart.
+  await page.getByLabel('Design mode').click()
+  await page.waitForTimeout(150)
+  const beforeMake = await readChart(page)
+  await page.getByLabel('Make mode').click()
+  await page.waitForTimeout(200)
+  await page.getByLabel('Design mode').click()
+  await page.waitForTimeout(200)
+  check.is(
+    'going in and out of making mode changes nothing',
+    JSON.stringify(await readChart(page)),
+    JSON.stringify(beforeMake),
+  )
+  await page.getByLabel('Make mode').click()
+  await page.waitForTimeout(200)
+
+  // The controls that EDIT are gone, so a mis-tap cannot alter a chart you are hours into.
+  check(
+    'making mode hides the design controls',
+    !(await page.getByLabel('Maximum colours', { exact: true }).isVisible().catch(() => false)),
+  )
+  check(
+    'and hides undo, because ticking off a row is not an edit',
+    !(await page.locator('header button[aria-label^="Undo"]').isVisible().catch(() => false)),
+  )
+  check(
+    'and hides reset for the same reason',
+    !(await page.getByLabel('Reset all settings').isVisible().catch(() => false)),
+  )
+  // Counting is exactly what you are doing here, so the grid stays.
+  check('but keeps the counting grid', await page.getByLabel('Show counting grid').isVisible())
+  check('and keeps the colour key within reach', await page.getByLabel('Colour key').isVisible())
+
+  // --- ticking off a colour run
+  const firstRun = await page.locator('[aria-label="Current row"] [aria-current="step"]').innerText()
+  await page.getByLabel('Done with this colour run').click()
+  await page.waitForTimeout(150)
+  const secondRun = await page.locator('[aria-label="Current row"] [aria-current="step"]').innerText()
+  check('ticking a colour run moves to the next one', firstRun !== secondRun, `${firstRun} -> ${secondRun}`)
+
+  // --- finishing rows
+  await page.getByLabel('Skip to the next row').click()
+  await page.waitForTimeout(150)
+  check('finishing a row moves to the next', /Row 2\b/.test(await rowPanel.innerText()))
+
+  await page.getByLabel('Back one colour run').click()
+  await page.waitForTimeout(150)
+  check('stepping back returns to the row before', /Row 1\b/.test(await rowPanel.innerText()))
+
+  // --- jumping to a row, the way you do when you pick the work back up
+  await page.getByLabel('Go to row').fill('5')
+  await page.getByRole('button', { name: 'Go', exact: true }).click()
+  await page.waitForTimeout(200)
+  check('you can jump straight to a row', /Row 5\b/.test(await rowPanel.innerText()))
+  check('and the progress panel follows', /4 of/.test(await page.getByLabel('Progress', { exact: true }).innerText()))
+
+  // --- your place survives closing the tab
+  // The position is keyed by the chart's own hash, so re-opening the same picture with
+  // the same settings has to land on the same row. This is the whole persistence design
+  // in one assertion: no project file, no account, nothing but the chart itself.
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.setInputFiles('input[type=file]', upload)
+  await page.waitForSelector('[aria-label="Chart summary"]', { timeout: 15000 })
+  const afterReload = await readChart(page)
+  check.is(
+    'reopening the same picture rebuilds the same chart',
+    JSON.stringify(afterReload),
+    JSON.stringify(beforeMake),
+  )
+  await page.getByLabel('Make mode').click()
+  await page.waitForTimeout(300)
+  check(
+    'and your place in it was kept',
+    /Row 5\b/.test(await page.getByLabel('Current row').innerText()),
+    await page.getByLabel('Current row').innerText(),
+  )
+
+  // --- but a DIFFERENT chart is a different piece of work, and starts at row 1
+  await page.getByLabel('Design mode').click()
+  await page.waitForTimeout(150)
+  await page.getByLabel('Detail', { exact: true }).fill('30')
+  await page.waitForTimeout(250)
+  await page.getByLabel('Make mode').click()
+  await page.waitForTimeout(300)
+  check(
+    'changing the design gives you a fresh row 1, not a stale position',
+    /Row 1\b/.test(await page.getByLabel('Current row').innerText()),
+    await page.getByLabel('Current row').innerText(),
+  )
+
+  await page.getByLabel('Design mode').click()
+  await page.waitForTimeout(150)
+
   check.is('no page errors along the way', errors.join(' | '), '')
 }

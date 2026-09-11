@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Grid3x3, Undo2, RotateCcw, PanelLeftClose, PanelLeft, Loader2 } from 'lucide-react'
 import Dropzone from './components/Dropzone.jsx'
+import Make from './components/Make.jsx'
 import Stage from './components/Stage.jsx'
 import Summary from './components/Summary.jsx'
 import Legend from './components/Legend.jsx'
@@ -30,7 +31,7 @@ import {
   SizePanel,
 } from './components/Controls.jsx'
 
-import { buildChart, emptyChart } from './lib/chart.js'
+import { buildChart, chartHash, emptyChart } from './lib/chart.js'
 import { computeLayout } from './lib/layout.js'
 import { lutFor } from './lib/palette.js'
 import { colourChanges, dimensions, legend, patternText } from './lib/pattern.js'
@@ -40,7 +41,8 @@ import { loadSource } from './lib/image.js'
 import { chartToPngBlob } from './lib/png.js'
 import { buildChartPdf } from './lib/chartPdf.js'
 import { downloadBlob, downloadData, suggestName } from './lib/download.js'
-import { loadSettings, saveSettings } from './lib/storage.js'
+import { loadProgress, loadSettings, saveProgress, saveSettings } from './lib/storage.js'
+import { emptyProgress, makeView, stepBounds, workedMask } from './lib/progress.js'
 
 export default function App() {
   const [source, setSource] = useState(null)
@@ -52,6 +54,7 @@ export default function App() {
 
   const settings = history.present
   const designMode = view.mode === 'design'
+  const makeMode = view.mode === 'make'
 
   /** Edits go through here so undo, coalescing and persistence all happen in one place. */
   const update = useCallback((producer, label) => {
@@ -127,6 +130,65 @@ export default function App() {
     [chart, settings.startsOnRightSide],
   )
 
+  // --- where you are, if you're making rather than designing -----------------
+
+  /**
+   * The position is keyed by the chart's own hash, and deliberately not held in the
+   * undo stack: ticking off a row is not an edit to the design, and undo dragging you
+   * back twenty rows of crochet would be indefensible.
+   *
+   * Hashing is gated on making mode because it's O(cells), and design mode rebuilds the
+   * chart on every slider tick — there is no reason to pay for a key nothing reads.
+   */
+  const chartId = useMemo(
+    () => (makeMode && chart.stitches ? chartHash(chart) : ''),
+    [makeMode, chart],
+  )
+
+  const [place, setPlace] = useState(() => ({ chartId: '', progress: emptyProgress() }))
+
+  useEffect(() => {
+    if (!chartId) return
+    setPlace((p) => (p.chartId === chartId ? p : { chartId, progress: loadProgress(chartId) ?? emptyProgress() }))
+  }, [chartId])
+
+  useEffect(() => {
+    // Only ever write a position back to the chart it was read for. Without this guard
+    // the save would fire once with the new chart's id and the old chart's row.
+    if (place.chartId && place.chartId === chartId) saveProgress(place.chartId, place.progress)
+  }, [chartId, place])
+
+  const setProgress = useCallback((producer) => {
+    setPlace((p) => ({ ...p, progress: producer(p.progress) }))
+  }, [])
+
+  const reading = useMemo(
+    () => ({ mode: settings.mode, startsOnRightSide: settings.startsOnRightSide }),
+    [settings.mode, settings.startsOnRightSide],
+  )
+
+  const make = useMemo(() => {
+    if (!makeMode || !chart.stitches) return null
+    const position = place.chartId === chartId ? place.progress : emptyProgress()
+    return makeView(chart, position, reading)
+  }, [makeMode, chart, chartId, place, reading])
+
+  const mask = useMemo(
+    () => (make ? workedMask(chart, make.reading, make.progress, reading) : null),
+    [make, chart, reading],
+  )
+
+  const marker = useMemo(
+    () => (make?.current ? stepBounds(chart, make.current.row, reading) : null),
+    [make, chart, reading],
+  )
+
+  const letters = useMemo(() => {
+    const byIndex = {}
+    for (const entry of key) byIndex[entry.index] = entry.letter
+    return byIndex
+  }, [key])
+
   // --- exports ------------------------------------------------------------
 
   const exportPng = useCallback(async () => {
@@ -170,24 +232,41 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-[100dvh] flex-col">
+    /*
+      Two layouts, not one. Wide enough for side-by-side, the app is a fixed-height
+      workspace whose panes scroll independently. Narrower than that it stacks, and a
+      fixed height would be actively harmful: the panel column is taller than the
+      screen, so it squeezes the stage down to a sliver and the chart — the thing you
+      came to look at — ends up a few pixels tall. Stacked, the page scrolls as a page.
+    */
+    <div className="flex min-h-[100dvh] flex-col lg:h-[100dvh]">
       <header
         className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2"
         style={{ borderColor: 'var(--line)', background: 'var(--surface)' }}
       >
         <h1 className="mr-1 text-base font-bold tracking-tight">stitch-grid</h1>
 
+        {/*
+          Three modes, in the order you meet them: decide what to make, see what it will
+          look like, then make it. Making is a mode rather than a separate page because
+          it reads the same Chart as everything else — switching cannot alter a stitch.
+        */}
         <div className="segmented" role="group" aria-label="Mode">
-          <button type="button" aria-pressed={designMode} aria-label="Design mode" onClick={() => setView((v) => ({ ...v, mode: 'design' }))}>
-            Design
-          </button>
-          <button type="button" aria-pressed={!designMode} aria-label="Preview mode" onClick={() => setView((v) => ({ ...v, mode: 'preview' }))}>
-            Preview
-          </button>
+          {MODES.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              aria-pressed={view.mode === item.id}
+              aria-label={`${item.label} mode`}
+              onClick={() => setView((v) => ({ ...v, mode: item.id }))}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {designMode ? (
+          {designMode || makeMode ? (
             <button
               type="button"
               className="btn-ghost !min-h-11 !px-2.5"
@@ -199,27 +278,31 @@ export default function App() {
               <Grid3x3 className="h-4 w-4" />
             </button>
           ) : null}
-          <button
-            type="button"
-            className="btn-ghost !min-h-11 !px-2.5"
-            aria-label={describeUndo(history)}
-            disabled={!canUndo(history)}
-            onClick={() => setHistory(undo)}
-          >
-            <Undo2 className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className="btn-ghost !min-h-11 !px-2.5"
-            aria-label="Reset all settings"
-            onClick={() =>
-              setHistory((h) =>
-                reset(h, normalizeSettings({ ...DEFAULT_SETTINGS, sourceName: h.present.sourceName })),
-              )
-            }
-          >
-            <RotateCcw className="h-4 w-4" />
-          </button>
+          {makeMode ? null : (
+            <>
+              <button
+                type="button"
+                className="btn-ghost !min-h-11 !px-2.5"
+                aria-label={describeUndo(history)}
+                disabled={!canUndo(history)}
+                onClick={() => setHistory(undo)}
+              >
+                <Undo2 className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                className="btn-ghost !min-h-11 !px-2.5"
+                aria-label="Reset all settings"
+                onClick={() =>
+                  setHistory((h) =>
+                    reset(h, normalizeSettings({ ...DEFAULT_SETTINGS, sourceName: h.present.sourceName })),
+                  )
+                }
+              >
+                <RotateCcw className="h-4 w-4" />
+              </button>
+            </>
+          )}
           {designMode ? (
             <button
               type="button"
@@ -246,12 +329,14 @@ export default function App() {
             setView={setView}
             /* The grid is a counting aid, not part of the blanket, so preview mode
                drops it along with everything else you wouldn't see in the finished
-               object. */
-            showGrid={designMode && view.showGrid}
-            showRulers={designMode}
-            fullBleed={!designMode}
+               object. Making mode keeps it — that is when you are counting most. */
+            showGrid={(designMode || makeMode) && view.showGrid}
+            showRulers={designMode || makeMode}
+            fullBleed={view.mode === 'preview'}
+            mask={mask}
+            marker={reading.mode === 'c2c' ? null : marker}
           />
-          <Summary dim={dim} joins={joins} unit={settings.gauge.unit} />
+          {makeMode ? null : <Summary dim={dim} joins={joins} unit={settings.gauge.unit} />}
         </div>
 
         {/*
@@ -274,7 +359,21 @@ export default function App() {
           </div>
         ) : null}
 
-        {!designMode ? (
+        {makeMode && make ? (
+          <div className="scroll-y flex w-full shrink-0 flex-col gap-3 lg:w-[22rem]">
+            <Make
+              chart={chart}
+              make={make}
+              setProgress={setProgress}
+              letters={letters}
+              mode={reading.mode}
+              onRestart={() => setProgress(() => emptyProgress())}
+            />
+            <Legend entries={key} unit={settings.gauge.unit} />
+          </div>
+        ) : null}
+
+        {view.mode === 'preview' ? (
           <div className="scroll-y flex w-full shrink-0 flex-col gap-3 lg:w-[22rem]">
             <Legend entries={key} unit={settings.gauge.unit} />
             <ExportBar onPng={exportPng} onPdf={exportPdf} onCopy={copyPattern} disabled={!chart.stitches} />
@@ -284,6 +383,12 @@ export default function App() {
     </div>
   )
 }
+
+const MODES = [
+  { id: 'design', label: 'Design' },
+  { id: 'preview', label: 'Preview' },
+  { id: 'make', label: 'Make' },
+]
 
 function stripExtension(name) {
   return name.replace(/\.[^.]+$/, '')

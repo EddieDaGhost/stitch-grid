@@ -2,7 +2,15 @@
  * Drawing, asserted on the operation stream rather than on pixels.
  */
 
-import { cellEdges, cellHeightFor, chartPixelSize, drawChart, drawGrid } from '../src/lib/draw.js'
+import {
+  cellEdges,
+  cellHeightFor,
+  chartPixelSize,
+  drawChart,
+  drawGrid,
+  drawProgressMask,
+  strokeCellRect,
+} from '../src/lib/draw.js'
 import { RESOLVED } from '../src/lib/palette.js'
 import { coverage, recordingContext } from './recording.mjs'
 
@@ -100,4 +108,68 @@ export default async function run({ check }) {
     (40 * (4 / 16)) / (45 * (4 / 18)),
     0.02,
   )
+  // --- the making overlay
+  const overlay = chartOf(20, 24, () => 0)
+  // Bottom array row current, everything below it in crochet terms (nothing) worked.
+  const mask = new Uint8Array(overlay.stitches * overlay.rows).fill(0)
+  for (let x = 0; x < overlay.stitches; x++) mask[(overlay.rows - 1) * overlay.stitches + x] = 1
+
+  const maskCtx = recordingContext()
+  drawProgressMask(maskCtx, overlay, { width: 200, height: 240, mask })
+  const washes = maskCtx.ops.filter((o) => o.op === 'fillRect')
+  check('the overlay paints something', washes.length > 0)
+  // Exactly one row's worth of pixels is left bare: 200px wide by 240/24 tall.
+  check.is(
+    'but leaves the current row alone, so it stays at full strength',
+    coverage(maskCtx.ops, 200, 240).uncovered,
+    200 * (240 / overlay.rows),
+  )
+  check.is('and never washes a cell twice', coverage(maskCtx.ops, 200, 240).doubled, 0)
+
+  const allWorked = new Uint8Array(overlay.stitches * overlay.rows).fill(2)
+  const workedCtx = recordingContext()
+  drawProgressMask(workedCtx, overlay, { width: 200, height: 240, mask: allWorked })
+  check.is('a finished chart is washed edge to edge', coverage(workedCtx.ops, 200, 240).uncovered, 0)
+  check.is('still with no overlap', coverage(workedCtx.ops, 200, 240).doubled, 0)
+  check.is(
+    'and in one fill per row, because the wash collapses runs',
+    workedCtx.ops.filter((o) => o.op === 'fillRect').length,
+    overlay.rows,
+  )
+
+  const noMaskCtx = recordingContext()
+  drawProgressMask(noMaskCtx, overlay, { width: 200, height: 240, mask: null })
+  check.is('no mask draws nothing at all', noMaskCtx.ops.length, 0)
+
+  // --- the row marker
+  const markerCtx = recordingContext()
+  strokeCellRect(markerCtx, overlay, {
+    width: 200,
+    height: 240,
+    rect: { x0: 0, y0: overlay.rows - 1, x1: overlay.stitches, y1: overlay.rows },
+    colour: '#ff0000',
+  })
+  const marker = markerCtx.ops.filter((o) => o.op === 'segment')
+  check.is('the marker is a closed rectangle', marker.length, 4)
+  check.is('drawn in the colour it was given', markerCtx.ops.find((o) => o.op === 'strokeStyle')?.value, '#ff0000')
+  const xsOf = marker.map((o) => o.x)
+  const ysOf = marker.map((o) => o.y)
+  check('the marker stays inside the canvas', Math.min(...xsOf) >= 0 && Math.max(...xsOf) <= 200)
+  check('on both axes', Math.min(...ysOf) >= 0 && Math.max(...ysOf) <= 240)
+
+  const clampCtx = recordingContext()
+  strokeCellRect(clampCtx, overlay, {
+    width: 200,
+    height: 240,
+    rect: { x0: -5, y0: -5, x1: 9999, y1: 9999 },
+  })
+  const clamped = clampCtx.ops.filter((o) => o.op === 'segment')
+  check(
+    'an out-of-range rectangle is clamped rather than drawn off-canvas',
+    clamped.every((o) => o.x >= 0 && o.x <= 200 && o.y >= 0 && o.y <= 240),
+  )
+
+  const noRectCtx = recordingContext()
+  strokeCellRect(noRectCtx, overlay, { width: 200, height: 240, rect: null })
+  check.is('no rectangle draws nothing', noRectCtx.ops.length, 0)
 }

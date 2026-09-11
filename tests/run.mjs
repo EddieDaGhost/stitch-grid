@@ -21,6 +21,7 @@ const SUITES = [
   { name: 'quantize', file: './quantize.mjs', browser: false },
   { name: 'chart', file: './chart.mjs', browser: false },
   { name: 'pattern', file: './pattern.mjs', browser: false },
+  { name: 'progress', file: './progress.mjs', browser: false },
   { name: 'draw', file: './draw.mjs', browser: false },
   { name: 'pdf', file: './pdf.mjs', browser: false },
   { name: 'history', file: './history.mjs', browser: false },
