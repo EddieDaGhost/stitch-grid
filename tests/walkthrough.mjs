@@ -12,6 +12,15 @@ import { asUpload, photoPng } from './pngfixture.mjs'
 // colour-limit controls have something to do.
 const upload = asUpload('garden-photo.png', photoPng(800, 800))
 
+/*
+  A deliberately NON-square photo, because a square one hides the most important bug
+  this suite can catch. The picture's own shape is half of `rowsForAspect`, so anything
+  that loses it — and `ImageBitmap.close()` zeroing width and height is the easy way to
+  lose it — charts every photo as if it were square while every square fixture keeps
+  passing.
+*/
+const wideUpload = asUpload('wide-photo.png', photoPng(900, 600))
+
 /** The summary bar reads "84 × 96" under the "Chart" heading. */
 async function readChart(page) {
   const text = await page.getByLabel('Chart summary').innerText()
@@ -32,6 +41,40 @@ export default async function run({ page, check, errors, URL }) {
   // --- the empty state
   check('the empty state explains what this is', (await page.locator('h1').innerText()).includes('stitch-grid'))
   check('and says the picture stays on the device', await page.getByText(/never uploaded/i).isVisible())
+
+  /*
+    --- a photo's OWN shape drives the chart, not just the gauge
+
+    Done first, and with its own reload, because the file input only exists in the empty
+    state. 900x600 is 3:2; at single crochet that chart must be a good deal wider than it
+    is tall, and emphatically not square. A square fixture cannot catch a photo whose
+    aspect has been lost on the way in, and losing it is easy — `ImageBitmap.close()`
+    zeroes the width and height it was read from.
+  */
+  await page.setInputFiles('input[type=file]', wideUpload)
+  await page.waitForSelector('[aria-label="Chart summary"]', { timeout: 15000 })
+  const wide = await readChart(page)
+  check(
+    'a landscape photo makes a chart wider than it is tall',
+    wide.stitches > wide.rows,
+    `${wide.stitches} x ${wide.rows}`,
+  )
+  check.near(
+    'its row count follows the photo aspect AND the gauge',
+    wide.rows / wide.stitches,
+    (1 / 1.5) * (18 / 16),
+    0.05,
+  )
+  const wideSize = (await page.getByLabel('Chart summary').innerText()).match(
+    /(\d+(?:\.\d+)?)"\s*×\s*(\d+(?:\.\d+)?)"/,
+  )
+  check(
+    'and the finished blanket is wider than it is tall',
+    wideSize && Number(wideSize[1]) > Number(wideSize[2]),
+    wideSize ? `${wideSize[1]}" x ${wideSize[2]}"` : 'no size shown',
+  )
+
+  await page.reload({ waitUntil: 'networkidle' })
 
   // --- load a picture
   await page.setInputFiles('input[type=file]', upload)
@@ -140,6 +183,86 @@ export default async function run({ page, check, errors, URL }) {
   )
   await border.fill('0')
   await page.waitForTimeout(150)
+
+  // --- framing: which part of the photo becomes the blanket
+  const beforeCrop = await readChart(page)
+  check('the framing panel shows the photo itself', await page.getByLabel('The photo you loaded').isVisible())
+  check(
+    'and says the whole picture is in use to start with',
+    /whole picture/i.test(await page.getByLabel('Framing').innerText()),
+  )
+
+  const handle = page.getByLabel('Drag the bottom right corner of the crop')
+  await handle.scrollIntoViewIfNeeded()
+  await page.waitForTimeout(100)
+  const handleBox = await handle.boundingBox()
+  const frameBox = await page.getByLabel('Move the crop frame. Arrow keys nudge it.').boundingBox()
+  const grabX = handleBox.x + handleBox.width / 2
+  const grabY = handleBox.y + handleBox.height / 2
+  await page.mouse.move(grabX, grabY)
+  await page.mouse.down()
+  await page.mouse.move(grabX - frameBox.width * 0.4, grabY - frameBox.height * 0.4, { steps: 10 })
+  await page.mouse.up()
+  await page.waitForTimeout(250)
+
+  const dragged = await readChart(page)
+  check(
+    'dragging a corner crops the photo, so the chart gets smaller',
+    dragged.stitches < beforeCrop.stitches,
+    `${beforeCrop.stitches} -> ${dragged.stitches}`,
+  )
+  check(
+    'and the panel says how much of the picture is left',
+    /using \d+% of the picture/i.test(await page.getByLabel('Framing').innerText()),
+    await page.getByLabel('Framing').innerText(),
+  )
+  // A crop is an edit, so it belongs in undo — unlike zoom or the current mode.
+  check(
+    'a crop is an edit, and undo knows it',
+    /crop|framing/i.test(await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label')),
+    await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label'),
+  )
+
+  await page.getByLabel('Use the whole picture').click()
+  await page.waitForTimeout(250)
+  check.is('and "whole picture" puts it all back', (await readChart(page)).stitches, beforeCrop.stitches)
+  check(
+    'after which there is nothing left to restore',
+    await page.getByLabel('Use the whole picture').isDisabled(),
+  )
+
+  // --- filling a chosen grid crops rather than squashes
+  await page.getByRole('group', { name: 'Chart size' }).getByText('A size I choose').click()
+  await page.waitForTimeout(200)
+  const fitGroup = page.getByRole('group', { name: 'Fit the picture' })
+
+  await fitGroup.getByText('Whole picture').click()
+  await page.waitForTimeout(150)
+  check(
+    'keeping the whole picture needs a colour for the spare space',
+    await page.getByLabel('Fill the spare space with').isVisible(),
+  )
+
+  await fitGroup.getByText('Fill the grid').click()
+  await page.waitForTimeout(150)
+  check(
+    'filling the grid leaves no spare space to colour in',
+    !(await page.getByLabel('Fill the spare space with').isVisible().catch(() => false)),
+  )
+  check(
+    'and says it crops rather than squashes',
+    /cropped to the shape of the grid/i.test(await page.getByLabel('Size', { exact: true }).innerText()),
+  )
+
+  await fitGroup.getByText('Stretch').click()
+  await page.waitForTimeout(150)
+  check(
+    'while stretching admits out loud that circles become ovals',
+    /ovals/i.test(await page.getByLabel('Size', { exact: true }).innerText()),
+  )
+
+  await page.getByRole('group', { name: 'Chart size' }).getByText('From the photo').click()
+  await page.waitForTimeout(200)
 
   // --- corner to corner is a different reading, not a different chart
   const beforeC2C = await readChart(page)

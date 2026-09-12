@@ -37,10 +37,14 @@ gauge, so what you see is the shape you'll end up holding.
 
 **Designing**
 - Drag and drop a JPG, PNG or WebP
+- **Framing**: drag a frame over the photo to pick the part you want. A blanket is a
+  long job — it should be spent on the dog, not on the lawn around it
 - A detail slider, showing the stitch count live rather than a pixel size
 - Zoom, and a counting grid with a heavier line every ten stitches
 - A border of any width, in inches, added *around* the picture without squashing it
-- Set an exact chart size and either fit the whole picture or fill the grid
+- Set an exact chart size, and either keep the whole picture, fill the grid by cropping,
+  or stretch to fit — filling crops rather than squashing, because squashing turns every
+  circle in the photo into an oval, which is the exact thing this tool exists to stop
 - Brightness, contrast and saturation — yarn has a much narrower range than a photo,
   so these usually matter more than anything else
 - Undo and reset, where a slider drag counts as one step

@@ -8,6 +8,7 @@
 import { DEFAULT_GAUGE, MAX_ROWS, MAX_STITCHES, MIN_STITCHES } from '../config/gauge.js'
 import { PALETTE, SUBSETS } from '../config/palette.js'
 import { normalizeGauge } from './gauge.js'
+import { FULL_FRAME, normalizeCrop } from './layout.js'
 
 export const MIN_DETAIL = 5
 export const MAX_DETAIL = 50
@@ -18,9 +19,17 @@ export const DEFAULT_SETTINGS = {
   gauge: { ...DEFAULT_GAUGE },
   /** Source pixels per block. Shown as "Detail", with the stitch count underneath. */
   detailPx: 16,
+  /** Which part of the photo is the picture at all, normalised 0..1. */
+  crop: { ...FULL_FRAME },
   /** null = let the picture decide the size. Otherwise {stitches, rows}. */
   target: null,
-  /** 'contain' = the whole picture, padded. 'stretch' = fill the grid, distorted. */
+  /**
+   * How a picture fills a grid whose size the user typed. Never whether gauge
+   * correction happens — that applies in all three.
+   *   'contain' the whole picture, padded out to the grid
+   *   'cover'   fills the grid by cropping the edges away, undistorted
+   *   'stretch' fills the grid by squashing the picture into it
+   */
   fit: 'contain',
   border: { inches: 0, colorId: 'cream' },
   padColorId: 'cream',
@@ -75,7 +84,8 @@ export function normalizeSettings(raw) {
     gauge: normalizeGauge(s.gauge ?? DEFAULT_SETTINGS.gauge),
     detailPx: Math.round(clamp(s.detailPx, MIN_DETAIL, MAX_DETAIL, DEFAULT_SETTINGS.detailPx)),
     target,
-    fit: s.fit === 'stretch' ? 'stretch' : 'contain',
+    crop: normalizeCrop(s.crop),
+    fit: s.fit === 'stretch' || s.fit === 'cover' ? s.fit : 'contain',
     border: {
       inches: clamp(s.border?.inches, 0, 12, 0),
       colorId: VALID_IDS.has(s.border?.colorId) ? s.border.colorId : DEFAULT_SETTINGS.border.colorId,
@@ -113,6 +123,9 @@ export function settingsKey(settings, sourceId = '') {
     s.gauge.stitchesPer4,
     s.gauge.rowsPer4,
     s.detailPx,
+    // Rounded, because a crop comes from a finger on a photo: full float precision
+    // would miss the cache on sub-pixel jitter that cannot change a single cell.
+    [s.crop.x, s.crop.y, s.crop.w, s.crop.h].map((v) => v.toFixed(5)).join(','),
     s.target ? `${s.target.stitches}x${s.target.rows}` : '-',
     s.fit,
     s.border.inches,

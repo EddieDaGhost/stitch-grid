@@ -25,6 +25,11 @@ ask rather than "improving" it.
    size the user overrode, not whether the maths happens. Anything that draws the chart
    on square cells is a bug, including in the PDF.
 
+   The *picture's* own aspect is the other half of that formula, and it is easier to
+   lose than the gauge is. If a photo ever charts as though it were square, suspect
+   `source.aspect` before suspecting the maths — see the `ImageBitmap.close()` note
+   below, which is exactly how it went wrong once already.
+
 2. **No dithering. Not even as an option.** This gets proposed every time someone looks
    at the quantizer, so: a chart is ~60 cells wide, so there is no spatial resolution to
    trade away; a cell is a quarter-inch of yarn viewed from three feet, so the eye
@@ -61,7 +66,14 @@ ask rather than "improving" it.
    reset. A mis-tap while reaching past a propped-up tablet must not be able to change a
    chart somebody is forty hours into.
 
-9. **Your place is keyed by the chart, not by a slot.** `loadProgress` is keyed on
+9. **Fill the grid crops; it does not squash.** `fit: 'cover'` trims the sampled
+   rectangle to the grid's shape. Squashing a picture to fit turns every circle in it
+   into an oval, which is the precise failure rule 1 exists to prevent on the fabric —
+   offering it as the only way to fill a grid was a bug in the product, not a feature.
+   `fit: 'stretch'` is still there for anyone who wants it, named for what it does and
+   carrying a warning that says so.
+
+10. **Your place is keyed by the chart, not by a slot.** `loadProgress` is keyed on
    `chartHash`, so re-opening the same picture with the same settings lands on the row
    you left, and changing the design gives you a fresh row 1 rather than a position that
    silently means something else. That is what buys persistence with no project file, no
@@ -89,7 +101,7 @@ src/
 │   ├── color.js     sRGB <-> linear <-> CIELAB, CIEDE2000
 │   ├── palette.js   The 32³ lookup cube, neighbour table, colour capping
 │   ├── gauge.js     THE CORE: rowsForAspect, finished size, yardage
-│   ├── layout.js    Settings + picture shape -> where every cell comes from
+│   ├── layout.js    Crop, settings + picture shape -> where every cell comes from
 │   ├── raster.js    Summed-area table — why the slider is free
 │   ├── chart.js     The pipeline, and the Chart type
 │   ├── pattern.js   Rows, corner-to-corner, legend, yarn, written pattern
@@ -108,6 +120,7 @@ src/
 
 - Changing the yarn colours → `src/config/palette.js`
 - Changing how a photo becomes a grid → `src/lib/chart.js`
+- Changing which part of the photo is used at all → `src/lib/layout.js` (the crop)
 - Changing the crochet maths → `src/lib/gauge.js`
 - Changing what gets printed → `src/lib/chartPdf.js`
 - Changing how you keep your place while crocheting → `src/lib/progress.js`
@@ -179,6 +192,10 @@ The suites worth knowing about:
   at every single tick, and stitch ranges tile each row with no gap or overlap. An
   off-by-one at a row boundary is not a cosmetic bug here — it is somebody crocheting
   the wrong thing and not finding out for a fortnight.
+- **`walkthrough.mjs`** charts a NON-square photo before anything else, and that is not
+  incidental. Every other browser fixture is square, so a bug that loses the picture's
+  aspect leaves the whole suite green while charting every photograph as a square. Do
+  not make that first fixture square to simplify an assertion.
 - **`tablet.mjs`** checks the stage's own box, not just the canvas inside it. A canvas
   keeps its size and quietly overflows a collapsed parent, so asserting on the canvas
   alone will happily pass while the chart is a 32-pixel sliver.
@@ -195,6 +212,11 @@ The suites worth knowing about:
   than a cosmetic loss. See `TRANSLITERATE` in `pdf.js`.
 - **`createImageBitmap` needs `imageOrientation: 'from-image'`** or every photo taken in
   portrait on a phone arrives rotated.
+- **`ImageBitmap.close()` sets width and height to ZERO.** Read them into locals before
+  closing. Reading them afterwards gives `0 / 0`, and every `aspect > 0 ? aspect : 1`
+  guard downstream then silently treats the photo as square — so the app charts a 3:2
+  photo into a square blanket and nothing anywhere throws. This shipped once and was
+  invisible because every browser fixture was square.
 - **The summed-area table must be `Float64Array`.** A 1024² image sums past 6×10¹⁰, which
   overflows a uint32 and silently corrupts the bottom-right quadrant.
 - **Crochet row 1 is the BOTTOM row**, and odd rows read the cells array reversed. That

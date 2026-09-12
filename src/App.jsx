@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Grid3x3, Undo2, RotateCcw, PanelLeftClose, PanelLeft, Loader2 } from 'lucide-react'
 import Dropzone from './components/Dropzone.jsx'
+import CropPanel from './components/CropPanel.jsx'
 import Make from './components/Make.jsx'
 import Stage from './components/Stage.jsx'
 import Summary from './components/Summary.jsx'
@@ -32,7 +33,7 @@ import {
 } from './components/Controls.jsx'
 
 import { buildChart, chartHash, emptyChart } from './lib/chart.js'
-import { computeLayout } from './lib/layout.js'
+import { FULL_FRAME, computeLayout } from './lib/layout.js'
 import { lutFor } from './lib/palette.js'
 import { colourChanges, dimensions, legend, patternText } from './lib/pattern.js'
 import { DEFAULT_SETTINGS, DEFAULT_VIEW, normalizeSettings, settingsKey } from './lib/settings.js'
@@ -82,6 +83,8 @@ export default function App() {
           normalizeSettings({
             ...h.present,
             sourceName: loaded.name,
+            // A new picture is a new framing; the last one's crop means nothing here.
+            crop: { ...FULL_FRAME },
             target: null,
             locked: [],
             excluded: [],
@@ -347,6 +350,7 @@ export default function App() {
         */}
         {designMode && panelsOpen ? (
           <div className="scroll-y flex w-full shrink-0 flex-col gap-3 lg:w-[22rem]">
+            <CropPanel source={source} settings={settings} update={update} commit={endDrag} dim={dim} />
             <SizePanel settings={settings} update={update} commit={endDrag} dim={dim} layout={layout} />
             <GaugePanel settings={settings} update={update} dim={dim} />
             <PalettePanel settings={settings} update={update} commit={endDrag} chart={chart} />
