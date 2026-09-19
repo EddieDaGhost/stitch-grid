@@ -176,6 +176,8 @@ asserts all of it at two viewports.
 
 ```bash
 npm run check              # everything
+npm run check -- pure      # only the suites that need nothing but Node
+npm run check -- browser   # only the ones that drive Chromium
 npm run check -- gauge     # one suite
 TEST_URL=https://... npm run check
 ```
@@ -184,7 +186,11 @@ The pure suites need nothing but Node — `playwright-core` is imported lazily s
 checkout can run them. Browser suites drive real Chromium found via `CHROME_PATH` or
 `PLAYWRIGHT_BROWSERS_PATH`; no browser is downloaded at install.
 
-**Run `npm run check` before pushing.** There is no CI, so it's the only safety net.
+**Run `npm run check` before pushing anyway.** `.github/workflows/check.yml` runs the
+same suites on every pull request, split into a pure job and a browser job, but CI is a
+backstop rather than the loop you work in — a red pull request costs a round trip that
+thirty seconds locally would have saved. The groups live in `tests/run.mjs`, not in the
+workflow, so adding a suite cannot forget to run it.
 
 The suites worth knowing about:
 

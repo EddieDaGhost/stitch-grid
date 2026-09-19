@@ -30,10 +30,24 @@ const SUITES = [
   { name: 'tablet', file: './tablet.mjs', browser: true, ownContexts: true },
 ]
 
+/**
+ * A suite name, or one of two groups.
+ *
+ * `pure` is the useful one: those suites need nothing but Node, which is the property
+ * that lets a bare checkout — or a CI job with no browser on it — still prove the
+ * crochet maths, the colour maths and the PDF writer. Keeping the group here rather
+ * than as a list of names in a workflow file means adding a suite cannot quietly
+ * forget to run it.
+ */
 const filter = process.argv[2]
-const selected = filter ? SUITES.filter((s) => s.name === filter) : SUITES
+const GROUPS = {
+  pure: (suite) => !suite.browser,
+  browser: (suite) => suite.browser,
+}
+const selected = filter ? SUITES.filter(GROUPS[filter] ?? ((s) => s.name === filter)) : SUITES
 if (!selected.length) {
-  console.error(`No suite called "${filter}". Known: ${SUITES.map((s) => s.name).join(', ')}`)
+  const known = [...Object.keys(GROUPS), ...SUITES.map((s) => s.name)].join(', ')
+  console.error(`No suite called "${filter}". Known: ${known}`)
   process.exit(1)
 }
 

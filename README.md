@@ -96,8 +96,12 @@ npm install
 npm run dev        # http://localhost:5173
 npm run build      # static files in dist/
 npm run check      # the whole test suite
-npm run check -- gauge   # one suite; the pure ones need nothing but Node
+npm run check -- pure    # just the suites that need nothing but Node
+npm run check -- gauge   # one suite
 ```
+
+The same suites run on every pull request via GitHub Actions, split so that the pure
+ones report separately from the ones that need a browser.
 
 Deploys as a static site anywhere. On Vercel: framework preset Vite, output `dist/`, no
 environment variables.
