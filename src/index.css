@@ -34,6 +34,21 @@
   --grid-line: rgba(0, 0, 0, 0.16);
   --grid-bold: rgba(0, 0, 0, 0.42);
 
+  /* Making mode washes both worked and not-yet cells towards the page, so the row you
+     are on is the only thing left at full strength. Washing towards the SAME colour in
+     both directions is what keeps the effect readable in either theme. */
+  --made-worked: rgba(250, 248, 245, 0.72);
+  --made-ahead: rgba(250, 248, 245, 0.3);
+
+  /* What's outside the crop frame. Dark in both themes: this one dims a PHOTO, not the
+     page, and a light veil over a light photo shows nothing at all. */
+  --crop-shade: rgba(18, 20, 23, 0.55);
+  /* Likewise the handles. They sit on somebody's photograph, which has no theme and no
+     agreed contrast — so a white core with an accent ring and a dark outer edge, which
+     survives being dropped on a teal sky or a white wall. */
+  --crop-handle: #ffffff;
+  --crop-handle-edge: rgba(18, 20, 23, 0.5);
+
   --radius: 14px;
   --shadow: 0 1px 2px rgba(24, 28, 32, 0.05), 0 4px 14px rgba(24, 28, 32, 0.05);
 }
@@ -60,6 +75,12 @@
     --stage-bg: #101215;
     --grid-line: rgba(255, 255, 255, 0.14);
     --grid-bold: rgba(255, 255, 255, 0.4);
+
+    --made-worked: rgba(22, 24, 27, 0.74);
+    --made-ahead: rgba(22, 24, 27, 0.32);
+
+    --crop-shade: rgba(9, 10, 12, 0.66);
+    /* --crop-handle and its edge deliberately do NOT change with the theme. */
 
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.3);
   }

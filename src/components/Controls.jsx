@@ -13,7 +13,9 @@ import { formatSize } from '../lib/gauge.js'
 
 export function Panel({ title, hint, children }) {
   return (
-    <section className="panel p-4">
+    /* Named, so each panel is a landmark a screen reader can jump between — and so the
+       browser suite can scope an assertion to one panel rather than the whole page. */
+    <section className="panel p-4" aria-label={title}>
       <h2 className="section-title">{title}</h2>
       {hint ? (
         <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--ink-3)' }}>
@@ -266,17 +268,39 @@ export function SizePanel({ settings, update, commit, dim, layout }) {
           </div>
           {/*
             Deliberately NOT labelled "keep ratio / stretch". Gauge correction applies in
-            both modes; a "keep ratio" label makes people think the other one turns it off.
+            all three; a "keep ratio" label makes people think the others turn it off.
+
+            "Fill the grid" now crops rather than squashes, which is what people meant by
+            it all along — squashing a picture to fill a grid turns every circle in it
+            into an oval, the exact failure this app exists to prevent on the fabric
+            side. Stretching is still there for anyone who wants it, named for what it
+            actually does.
           */}
           <Segmented
             label="Fit the picture"
             value={settings.fit}
             options={[
               { value: 'contain', label: 'Whole picture' },
-              { value: 'stretch', label: 'Fill the grid' },
+              { value: 'cover', label: 'Fill the grid' },
+              { value: 'stretch', label: 'Stretch' },
             ]}
             onChange={(v) => update((s) => ({ ...s, fit: v }), 'fit')}
           />
+          {settings.fit === 'cover' ? (
+            <p className="text-xs leading-relaxed" style={{ color: 'var(--ink-3)' }}>
+              The picture is cropped to the shape of the grid. Adjust the framing above to
+              choose which part survives.
+            </p>
+          ) : null}
+          {settings.fit === 'stretch' ? (
+            <p
+              className="rounded-lg px-3 py-2 text-xs leading-relaxed"
+              style={{ background: 'var(--attention-soft)', color: 'var(--attention)' }}
+            >
+              This squashes the picture to fit. Circles in it will come out as ovals —
+              "Fill the grid" crops instead, which usually looks better.
+            </p>
+          ) : null}
           {settings.fit === 'contain' ? (
             <ColorSelect
               label="Fill the spare space with"

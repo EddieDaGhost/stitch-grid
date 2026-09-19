@@ -3,6 +3,8 @@
  * how much yarn to buy.
  */
 
+import { inkOn } from '../lib/color.js'
+
 export default function Legend({ entries, unit }) {
   if (!entries?.length) return null
   return (
@@ -13,7 +15,7 @@ export default function Legend({ entries, unit }) {
           <li key={entry.colour.id} className="flex items-center gap-3">
             <span
               className="swatch grid place-items-center text-xs font-bold"
-              style={{ background: entry.colour.hex, color: luminance(entry.colour.rgb) > 0.42 ? '#000' : '#fff' }}
+              style={{ background: entry.colour.hex, color: `rgb(${inkOn(entry.colour.rgb).join(',')})` }}
               aria-hidden="true"
             >
               {entry.letter}
@@ -39,12 +41,4 @@ export default function Legend({ entries, unit }) {
       </p>
     </section>
   )
-}
-
-function luminance([r, g, b]) {
-  const lin = (c) => {
-    const s = c / 255
-    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
-  }
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
 }

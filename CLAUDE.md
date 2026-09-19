@@ -25,6 +25,11 @@ ask rather than "improving" it.
    size the user overrode, not whether the maths happens. Anything that draws the chart
    on square cells is a bug, including in the PDF.
 
+   The *picture's* own aspect is the other half of that formula, and it is easier to
+   lose than the gauge is. If a photo ever charts as though it were square, suspect
+   `source.aspect` before suspecting the maths — see the `ImageBitmap.close()` note
+   below, which is exactly how it went wrong once already.
+
 2. **No dithering. Not even as an option.** This gets proposed every time someone looks
    at the quantizer, so: a chart is ~60 cells wide, so there is no spatial resolution to
    trade away; a cell is a quarter-inch of yarn viewed from three feet, so the eye
@@ -50,9 +55,37 @@ ask rather than "improving" it.
    house. The service worker precaches the shell; nothing on the path to a first chart
    may wait on the network.
 
-7. **Undo undoes edits, not looks.** Zoom, grid visibility and design/preview mode are
+7. **Undo undoes edits, not looks.** Zoom, grid visibility and the current mode are
    view state and are never committed to history. This is the single thing that decides
    whether undo feels useful or broken.
+
+8. **Progress is not a design edit, and making mode cannot make one.** How far up the
+   chart you have crocheted lives outside the undo stack entirely — undo dragging
+   somebody back twenty rows of finished work would be indefensible. For the same
+   reason making mode shows no control that can alter a stitch: no sliders, no undo, no
+   reset. A mis-tap while reaching past a propped-up tablet must not be able to change a
+   chart somebody is forty hours into.
+
+9. **Fill the grid crops; it does not squash.** `fit: 'cover'` trims the sampled
+   rectangle to the grid's shape. Squashing a picture to fit turns every circle in it
+   into an oval, which is the precise failure rule 1 exists to prevent on the fabric —
+   offering it as the only way to fill a grid was a bug in the product, not a feature.
+   `fit: 'stretch'` is still there for anyone who wants it, named for what it does and
+   carrying a warning that says so.
+
+10. **A chart must be readable without relying on colour.** Every cell can carry its
+   key letter — in the PDF since the first version, and on screen since letters got
+   their own layer. A yarn palette is dense in near-neutrals, so Sage and Moss are a
+   guess at arm's length even for someone who sees both perfectly; for the share of
+   people who do not, a colour-only chart is not hard, it is unusable. The letters come
+   from the legend's ranking so the screen, the key and the printed sheet can never call
+   the same colour different things.
+
+11. **Your place is keyed by the chart, not by a slot.** `loadProgress` is keyed on
+   `chartHash`, so re-opening the same picture with the same settings lands on the row
+   you left, and changing the design gives you a fresh row 1 rather than a position that
+   silently means something else. That is what buys persistence with no project file, no
+   account and no stored image.
 
 ---
 
@@ -76,7 +109,7 @@ src/
 │   ├── color.js     sRGB <-> linear <-> CIELAB, CIEDE2000
 │   ├── palette.js   The 32³ lookup cube, neighbour table, colour capping
 │   ├── gauge.js     THE CORE: rowsForAspect, finished size, yardage
-│   ├── layout.js    Settings + picture shape -> where every cell comes from
+│   ├── layout.js    Crop, settings + picture shape -> where every cell comes from
 │   ├── raster.js    Summed-area table — why the slider is free
 │   ├── chart.js     The pipeline, and the Chart type
 │   ├── pattern.js   Rows, corner-to-corner, legend, yarn, written pattern
@@ -85,7 +118,8 @@ src/
 │   ├── chartPdf.js  The printable document: cover, tiles, pattern
 │   ├── settings.js  Defaults, clamping, the chart cache key
 │   ├── history.js   Undo
-│   └── image/png/download/storage.js   ← the ONLY modules that touch the DOM
+│   ├── progress.js  Where you are while making: stepping, stats, the chart overlay
+│   └── image/png/download/storage/wakelock.js  ← the ONLY modules that touch the DOM
 ├── components/      All UI
 └── index.css        Every interface colour, as CSS variables
 ```
@@ -94,8 +128,10 @@ src/
 
 - Changing the yarn colours → `src/config/palette.js`
 - Changing how a photo becomes a grid → `src/lib/chart.js`
+- Changing which part of the photo is used at all → `src/lib/layout.js` (the crop)
 - Changing the crochet maths → `src/lib/gauge.js`
 - Changing what gets printed → `src/lib/chartPdf.js`
+- Changing how you keep your place while crocheting → `src/lib/progress.js`
 - Changing how it looks → `src/index.css` (tokens) or the component
 
 ---
@@ -123,6 +159,11 @@ whether something moved a colour computation into the render loop.
 2D methods it uses, so the preview, the PNG export and a 20-line recording stub in the
 tests all drive identical code.
 
+**The stage is three stacked canvases, and the order is load-bearing.** `data-layer`
+names each one in the markup: `chart` (cells, then the making wash) at the backing
+resolution, `letters` above it at the same resolution so they land exactly on the cells,
+and `grid` on top at the VIEWPORT resolution so hairlines stay hairlines at any zoom.
+
 **Mobile and tablet first, genuinely.** The target is an iPad propped on a craft table and
 a phone in a pocket, operated by someone holding a hook. Tap targets ≥ 44px on *both*
 axes, every field at exactly 16px (smaller makes iOS zoom the page), `touch-action: none`
@@ -135,6 +176,8 @@ asserts all of it at two viewports.
 
 ```bash
 npm run check              # everything
+npm run check -- pure      # only the suites that need nothing but Node
+npm run check -- browser   # only the ones that drive Chromium
 npm run check -- gauge     # one suite
 TEST_URL=https://... npm run check
 ```
@@ -143,7 +186,11 @@ The pure suites need nothing but Node — `playwright-core` is imported lazily s
 checkout can run them. Browser suites drive real Chromium found via `CHROME_PATH` or
 `PLAYWRIGHT_BROWSERS_PATH`; no browser is downloaded at install.
 
-**Run `npm run check` before pushing.** There is no CI, so it's the only safety net.
+**Run `npm run check` before pushing anyway.** `.github/workflows/check.yml` runs the
+same suites on every pull request, split into a pure job and a browser job, but CI is a
+backstop rather than the loop you work in — a red pull request costs a round trip that
+thirty seconds locally would have saved. The groups live in `tests/run.mjs`, not in the
+workflow, so adding a suite cannot forget to run it.
 
 The suites worth knowing about:
 
@@ -159,6 +206,18 @@ The suites worth knowing about:
   from a browser, so the two code paths can't drift apart.
 - **`pattern.mjs`** pins the row direction with a four-cell fixture. Get it backwards and
   every chart is mirrored — which nobody discovers until they've crocheted it.
+- **`progress.mjs`** asserts an invariant rather than examples: ticking through a whole
+  chart run by run visits every stitch exactly once, the overlay and the numbers agree
+  at every single tick, and stitch ranges tile each row with no gap or overlap. An
+  off-by-one at a row boundary is not a cosmetic bug here — it is somebody crocheting
+  the wrong thing and not finding out for a fortnight.
+- **`walkthrough.mjs`** charts a NON-square photo before anything else, and that is not
+  incidental. Every other browser fixture is square, so a bug that loses the picture's
+  aspect leaves the whole suite green while charting every photograph as a square. Do
+  not make that first fixture square to simplify an assertion.
+- **`tablet.mjs`** checks the stage's own box, not just the canvas inside it. A canvas
+  keeps its size and quietly overflows a collapsed parent, so asserting on the canvas
+  alone will happily pass while the chart is a 32-pixel sliver.
 
 ---
 
@@ -172,6 +231,11 @@ The suites worth knowing about:
   than a cosmetic loss. See `TRANSLITERATE` in `pdf.js`.
 - **`createImageBitmap` needs `imageOrientation: 'from-image'`** or every photo taken in
   portrait on a phone arrives rotated.
+- **`ImageBitmap.close()` sets width and height to ZERO.** Read them into locals before
+  closing. Reading them afterwards gives `0 / 0`, and every `aspect > 0 ? aspect : 1`
+  guard downstream then silently treats the photo as square — so the app charts a 3:2
+  photo into a square blanket and nothing anywhere throws. This shipped once and was
+  invisible because every browser fixture was square.
 - **The summed-area table must be `Float64Array`.** A 1024² image sums past 6×10¹⁰, which
   overflows a uint32 and silently corrupts the bottom-right quadrant.
 - **Crochet row 1 is the BOTTOM row**, and odd rows read the cells array reversed. That
@@ -182,6 +246,22 @@ The suites worth knowing about:
 - **`innerText` in tests returns the RENDERED text**, so `.label` elements come back
   uppercased by CSS. Match case-insensitively.
 - **Tailwind only keeps classes it can literally see.** No constructed class names.
+- **One `fillText` per cell is the most expensive thing the renderer does.** Measured in
+  Chromium: ~44ms for a 5,000 cell chart, ~350ms for a big one — three to twenty frames.
+  Design mode rebuilds the chart on every tick of the detail slider, so the letters get
+  their OWN canvas layer and their own delayed pass (`LETTER_DELAY_MS` in `Stage.jsx`).
+  Drag a slider and they are simply absent; stop, and they appear. Never move them back
+  into the chart-canvas pass to "simplify" it.
+- **Printed stitch numbers are not working order.** Stitch 1 is the right-hand edge, so
+  a right-side row is worked in ascending numbers and a wrong-side row counts DOWN from
+  the stitch count. `runRange` is the only place allowed to know that; everywhere else
+  works in hook order.
+- **`scrollIntoView` scrolls every scrollable ancestor, the page included.** Keeping the
+  current run visible with it silently scrolls the chart off the top of a stacked
+  layout on every tick. Move the list's own `scrollTop` instead.
+- **Below `lg` the app stacks, and must NOT be a fixed height.** The panel column is
+  taller than the screen, so `h-[100dvh]` hands the stage whatever is left — nothing.
+  The stage carries its own `min-h` for the stacked case; `tests/tablet.mjs` guards it.
 
 ---
 

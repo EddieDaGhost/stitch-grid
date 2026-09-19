@@ -2,8 +2,20 @@
  * Drawing, asserted on the operation stream rather than on pixels.
  */
 
-import { cellEdges, cellHeightFor, chartPixelSize, drawChart, drawGrid } from '../src/lib/draw.js'
+import {
+  cellEdges,
+  cellHeightFor,
+  chartPixelSize,
+  drawChart,
+  drawGrid,
+  drawLetters,
+  drawProgressMask,
+  strokeCellRect,
+} from '../src/lib/draw.js'
 import { RESOLVED } from '../src/lib/palette.js'
+import { inkOn, relativeLuminance } from '../src/lib/color.js'
+import { legend } from '../src/lib/pattern.js'
+import { chartLetter } from '../src/config/palette.js'
 import { coverage, recordingContext } from './recording.mjs'
 
 const SC = { stitchesPer4: 16, rowsPer4: 18, unit: 'in' }
@@ -99,5 +111,146 @@ export default async function run({ check }) {
     size.width / size.height,
     (40 * (4 / 16)) / (45 * (4 / 18)),
     0.02,
+  )
+  // --- the making overlay
+  const overlay = chartOf(20, 24, () => 0)
+  // Bottom array row current, everything below it in crochet terms (nothing) worked.
+  const mask = new Uint8Array(overlay.stitches * overlay.rows).fill(0)
+  for (let x = 0; x < overlay.stitches; x++) mask[(overlay.rows - 1) * overlay.stitches + x] = 1
+
+  const maskCtx = recordingContext()
+  drawProgressMask(maskCtx, overlay, { width: 200, height: 240, mask })
+  const washes = maskCtx.ops.filter((o) => o.op === 'fillRect')
+  check('the overlay paints something', washes.length > 0)
+  // Exactly one row's worth of pixels is left bare: 200px wide by 240/24 tall.
+  check.is(
+    'but leaves the current row alone, so it stays at full strength',
+    coverage(maskCtx.ops, 200, 240).uncovered,
+    200 * (240 / overlay.rows),
+  )
+  check.is('and never washes a cell twice', coverage(maskCtx.ops, 200, 240).doubled, 0)
+
+  const allWorked = new Uint8Array(overlay.stitches * overlay.rows).fill(2)
+  const workedCtx = recordingContext()
+  drawProgressMask(workedCtx, overlay, { width: 200, height: 240, mask: allWorked })
+  check.is('a finished chart is washed edge to edge', coverage(workedCtx.ops, 200, 240).uncovered, 0)
+  check.is('still with no overlap', coverage(workedCtx.ops, 200, 240).doubled, 0)
+  check.is(
+    'and in one fill per row, because the wash collapses runs',
+    workedCtx.ops.filter((o) => o.op === 'fillRect').length,
+    overlay.rows,
+  )
+
+  const noMaskCtx = recordingContext()
+  drawProgressMask(noMaskCtx, overlay, { width: 200, height: 240, mask: null })
+  check.is('no mask draws nothing at all', noMaskCtx.ops.length, 0)
+
+  // --- the row marker
+  const markerCtx = recordingContext()
+  strokeCellRect(markerCtx, overlay, {
+    width: 200,
+    height: 240,
+    rect: { x0: 0, y0: overlay.rows - 1, x1: overlay.stitches, y1: overlay.rows },
+    colour: '#ff0000',
+  })
+  const marker = markerCtx.ops.filter((o) => o.op === 'segment')
+  check.is('the marker is a closed rectangle', marker.length, 4)
+  check.is('drawn in the colour it was given', markerCtx.ops.find((o) => o.op === 'strokeStyle')?.value, '#ff0000')
+  const xsOf = marker.map((o) => o.x)
+  const ysOf = marker.map((o) => o.y)
+  check('the marker stays inside the canvas', Math.min(...xsOf) >= 0 && Math.max(...xsOf) <= 200)
+  check('on both axes', Math.min(...ysOf) >= 0 && Math.max(...ysOf) <= 240)
+
+  const clampCtx = recordingContext()
+  strokeCellRect(clampCtx, overlay, {
+    width: 200,
+    height: 240,
+    rect: { x0: -5, y0: -5, x1: 9999, y1: 9999 },
+  })
+  const clamped = clampCtx.ops.filter((o) => o.op === 'segment')
+  check(
+    'an out-of-range rectangle is clamped rather than drawn off-canvas',
+    clamped.every((o) => o.x >= 0 && o.x <= 200 && o.y >= 0 && o.y <= 240),
+  )
+
+  const noRectCtx = recordingContext()
+  strokeCellRect(noRectCtx, overlay, { width: 200, height: 240, rect: null })
+  check.is('no rectangle draws nothing', noRectCtx.ops.length, 0)
+  // --- a letter in every cell
+  const lettered = chartOf(12, 14, (x, y) => (x + y) % 4)
+  const letters = ['A', 'B', 'C', 'D']
+
+  const bigCtx = recordingContext()
+  drawLetters(bigCtx, lettered, { width: 12 * 20, height: 14 * 20, letters })
+  const drawn = bigCtx.ops.filter((o) => o.op === 'fillText')
+  check.is('every cell gets its letter', drawn.length, 12 * 14)
+  check('and they are the letters it was handed', drawn.every((o) => letters.includes(o.text)))
+  check.is('centred in the cell', `${drawn[0].textAlign},${drawn[0].textBaseline}`, 'center,middle')
+
+  // Each letter must land inside its OWN cell, not on a boundary or its neighbour.
+  const cellOf = (op) => `${Math.floor(op.x / 20)},${Math.floor(op.y / 20)}`
+  check.is('one letter per cell, with none doubled up', new Set(drawn.map(cellOf)).size, 12 * 14)
+  check(
+    'and every letter sits within the canvas',
+    drawn.every((o) => o.x > 0 && o.x < 240 && o.y > 0 && o.y < 280),
+  )
+
+  // Ink flips with the swatch, or a letter vanishes into its own cell.
+  const inkFor = (letterIndex) => {
+    const op = drawn.find((o) => o.text === letters[letterIndex])
+    return op.fill
+  }
+  let inkAlwaysReadable = true
+  for (let i = 0; i < letters.length; i++) {
+    const wantDark = relativeLuminance(lettered.palette[i].rgb) > 0.42
+    const isDark = inkFor(i) === '#000000'
+    if (wantDark !== isDark) inkAlwaysReadable = false
+  }
+  check('the letter is inked black or white to stay readable on its own colour', inkAlwaysReadable)
+  check(
+    'which is the same rule the PDF uses',
+    inkOn(lettered.palette[0].rgb).every((v) => v === 0 || v === 255),
+  )
+
+  // --- too small to read is worse than nothing
+  const smallCtx = recordingContext()
+  drawLetters(smallCtx, lettered, { width: 12 * 5, height: 14 * 5, letters })
+  check.is('no letters are drawn when the cells are tiny', smallCtx.ops.filter((o) => o.op === 'fillText').length, 0)
+
+  // The threshold is on the SHORTER axis — a cell can be wide and far too short.
+  const squashedCtx = recordingContext()
+  drawLetters(squashedCtx, lettered, { width: 12 * 40, height: 14 * 5, letters })
+  check.is(
+    'nor when only one axis is big enough',
+    squashedCtx.ops.filter((o) => o.op === 'fillText').length,
+    0,
+  )
+
+  const noneCtx = recordingContext()
+  drawLetters(noneCtx, lettered, { width: 240, height: 280, letters: null })
+  check.is('and nothing at all without a letter list', noneCtx.ops.length, 0)
+
+  // The type must grow with the cells, or it is unreadable at one zoom and clipped at another.
+  const fontAt = (px) => {
+    const ctx2 = recordingContext()
+    drawLetters(ctx2, lettered, { width: 12 * px, height: 14 * px, letters })
+    return Number(ctx2.ops.find((o) => o.op === 'font')?.value.match(/(\d+)px/)?.[1] ?? 0)
+  }
+  check('the letters grow with the cells', fontAt(40) > fontAt(20) && fontAt(20) > fontAt(10))
+  check('and always fit inside one', fontAt(40) < 40 && fontAt(20) < 20)
+
+  /*
+    The letters the chart shows must be the letters the colour key and the PDF name.
+    `drawLetters` is handed a list rather than deriving one precisely so those cannot
+    drift — but the caller builds that list by palette index, so the ranking behind it
+    has to line up. This is the assertion that says so.
+  */
+  const ranked = chartOf(30, 30, (x, y) => (x < 20 ? 0 : x < 26 ? 1 : x < 29 ? 2 : 3))
+  const key = legend(ranked)
+  check.is('the legend ranks the most-used colour first', key[0].letter, 'A')
+  check(
+    'and a palette index IS its rank, so letters line up with the key',
+    key.every((entry) => entry.letter === chartLetter(entry.index)),
+    key.map((e) => `${e.index}:${e.letter}`).join(' '),
   )
 }

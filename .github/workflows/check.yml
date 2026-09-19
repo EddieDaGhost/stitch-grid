@@ -1,0 +1,69 @@
+# The safety net this repo used to say it did not have.
+#
+# Two jobs on purpose. The pure suites need nothing but Node, so they run in seconds
+# and their result can never be muddied by a browser that failed to start — which
+# matters, because they are the ones holding the crochet maths, the colour maths and
+# the PDF writer. The browser job proves the rest against a real Chromium.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push supersedes the run already in flight for the same branch.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pure:
+    name: Pure suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check -- pure
+
+  browser:
+    name: Browser suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # No browser is downloaded at install time, by design — the harness finds one that
+      # already exists. Point it at the runner's Chrome explicitly so a missing browser
+      # fails with a sentence that says so, rather than somewhere further in.
+      - name: Locate Chrome
+        run: |
+          for candidate in \
+            "$CHROME_BIN" \
+            /usr/bin/google-chrome \
+            /usr/bin/google-chrome-stable \
+            /usr/bin/chromium \
+            /usr/bin/chromium-browser
+          do
+            if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+              echo "CHROME_PATH=$candidate" >> "$GITHUB_ENV"
+              echo "Using $candidate"
+              exit 0
+            fi
+          done
+          echo "::error::No Chrome or Chromium on this runner, so the browser suites cannot run."
+          exit 1
+
+      # Explicit, so a build failure reads as a build failure rather than as a test one.
+      - run: npm run build
+      - run: npm run check -- browser

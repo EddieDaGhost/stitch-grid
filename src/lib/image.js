@@ -29,16 +29,29 @@ export async function loadSource(file) {
   // anyone would report.
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
 
-  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height))
-  let width = Math.max(1, Math.round(bitmap.width * scale))
-  let height = Math.max(1, Math.round(bitmap.height * scale))
+  /*
+    Read the dimensions BEFORE anything closes the bitmap.
+
+    `ImageBitmap.close()` sets width and height to zero, so reading them afterwards
+    gives 0/0 — NaN — and every downstream guard of the form `aspect > 0 ? aspect : 1`
+    then quietly treats the photo as square. That is not a cosmetic failure here: the
+    picture's own shape is half of `rowsForAspect`, so a 3:2 photo charted as 1:1 comes
+    out squashed into a square blanket, which is the precise thing this app exists to
+    prevent. tests/walkthrough.mjs now charts a non-square photo for exactly this reason.
+  */
+  const sourceWidth = bitmap.width
+  const sourceHeight = bitmap.height
+
+  const scale = Math.min(1, MAX_EDGE / Math.max(sourceWidth, sourceHeight))
+  let width = Math.max(1, Math.round(sourceWidth * scale))
+  let height = Math.max(1, Math.round(sourceHeight * scale))
 
   // Halve repeatedly rather than doing one big drawImage. A single >2x reduction
   // aliases badly in every browser — fine detail turns into shimmer rather than an
   // average — and that noise then quantizes into speckle in the chart.
   let source = bitmap
-  let currentW = bitmap.width
-  let currentH = bitmap.height
+  let currentW = sourceWidth
+  let currentH = sourceHeight
   while (currentW > width * 2 && currentH > height * 2) {
     const halfW = Math.max(width, Math.round(currentW / 2))
     const halfH = Math.max(height, Math.round(currentH / 2))
@@ -57,9 +70,9 @@ export async function loadSource(file) {
   return {
     id: `src-${nextId++}`,
     name: file.name ?? 'image',
-    width: bitmap.width,
-    height: bitmap.height,
-    aspect: bitmap.width / bitmap.height,
+    width: sourceWidth,
+    height: sourceHeight,
+    aspect: sourceWidth / sourceHeight,
     raster,
     sat: buildSat(raster),
     // Few distinct colours means a logo or cartoon, where averaging across hard edges

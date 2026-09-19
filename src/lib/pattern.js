@@ -45,20 +45,63 @@ export function rowSide(row, startsOnRightSide = true) {
  *            runs:Array<{count:number, index:number}>, total:number}} RowInstruction
  */
 
+/**
+ * Array indices of one crochet row's cells, in the order the hook meets them.
+ *
+ * Working order, not chart order: an odd row is worked right to left, so it walks the
+ * array row backwards. Everything that needs to know WHERE a row is — the written
+ * pattern and the progress mask alike — goes through here, so the direction rule stays
+ * in one place rather than being re-derived by each caller.
+ */
+export function rowCells(chart, row, startsOnRightSide = true) {
+  const y = arrayRowIndex(chart, row)
+  const { reversed } = rowSide(row, startsOnRightSide)
+  const out = new Int32Array(chart.stitches)
+  for (let k = 0; k < chart.stitches; k++) {
+    const x = reversed ? chart.stitches - 1 - k : k
+    out[k] = y * chart.stitches + x
+  }
+  return out
+}
+
+/**
+ * Array indices of one corner-to-corner diagonal, in the order it is worked.
+ *
+ * Bands are anti-diagonals of the cell grid, counted from the bottom-left corner.
+ * Direction alternates band to band the same way rows do, because you turn at the end
+ * of each one.
+ */
+export function c2cBandCells(chart, band) {
+  const { stitches, rows } = chart
+  const d = band - 1
+  const coords = []
+  for (let k = 0; k <= d; k++) {
+    const x = k
+    const y = rows - 1 - (d - k)
+    if (x >= 0 && x < stitches && y >= 0 && y < rows) coords.push(y * stitches + x)
+  }
+  if (d % 2 === 0) coords.reverse()
+  return Int32Array.from(coords)
+}
+
+/** Run-length encode a walk over the chart. */
+function runsFrom(chart, cells) {
+  const runs = []
+  for (let i = 0; i < cells.length; i++) {
+    const index = chart.cells[cells[i]]
+    const last = runs[runs.length - 1]
+    if (last && last.index === index) last.count++
+    else runs.push({ count: 1, index })
+  }
+  return runs
+}
+
 /** Run-length encode every row, bottom row first. @returns {RowInstruction[]} */
 export function encodeRows(chart, { startsOnRightSide = true } = {}) {
   const out = []
   for (let row = 1; row <= chart.rows; row++) {
-    const y = arrayRowIndex(chart, row)
-    const { side, direction, reversed } = rowSide(row, startsOnRightSide)
-    const runs = []
-    for (let k = 0; k < chart.stitches; k++) {
-      const x = reversed ? chart.stitches - 1 - k : k
-      const index = chart.cells[y * chart.stitches + x]
-      const last = runs[runs.length - 1]
-      if (last && last.index === index) last.count++
-      else runs.push({ count: 1, index })
-    }
+    const { side, direction } = rowSide(row, startsOnRightSide)
+    const runs = runsFrom(chart, rowCells(chart, row, startsOnRightSide))
     out.push({ row, side, direction, runs, total: chart.stitches })
   }
   return out
@@ -81,34 +124,32 @@ export function encodeC2C(chart) {
   const out = []
 
   for (let d = 0; d < bands; d++) {
-    // Walk the anti-diagonal starting from the bottom-left corner of the picture.
-    const coords = []
-    for (let k = 0; k <= d; k++) {
-      const x = k
-      const y = rows - 1 - (d - k)
-      if (x >= 0 && x < stitches && y >= 0 && y < rows) coords.push([x, y])
-    }
-    if (!coords.length) continue
-
-    const up = d % 2 === 1
-    const ordered = up ? coords : [...coords].reverse()
-    const runs = []
-    for (const [x, y] of ordered) {
-      const index = chart.cells[y * stitches + x]
-      const last = runs[runs.length - 1]
-      if (last && last.index === index) last.count++
-      else runs.push({ count: 1, index })
-    }
+    const cells = c2cBandCells(chart, d + 1)
+    if (!cells.length) continue
 
     out.push({
       row: d + 1,
       phase: d < Math.min(stitches, rows) ? 'increase' : 'decrease',
-      direction: up ? '↗' : '↙',
-      runs,
-      total: coords.length,
+      direction: d % 2 === 1 ? '↗' : '↙',
+      runs: runsFrom(chart, cells),
+      total: cells.length,
     })
   }
   return out
+}
+
+/**
+ * The reading of a chart in the mode the user picked: rows from the bottom up, or
+ * corner-to-corner diagonals. Both are the same shape, so everything downstream —
+ * the written pattern, the progress tracker — works on either without branching.
+ */
+export function readingFor(chart, { mode = 'rows', startsOnRightSide = true } = {}) {
+  return mode === 'c2c' ? encodeC2C(chart) : encodeRows(chart, { startsOnRightSide })
+}
+
+/** Array indices worked in one step of that reading, in working order. */
+export function stepCells(chart, step, { mode = 'rows', startsOnRightSide = true } = {}) {
+  return mode === 'c2c' ? c2cBandCells(chart, step) : rowCells(chart, step, startsOnRightSide)
 }
 
 /** Cells per colour, most used first. */
