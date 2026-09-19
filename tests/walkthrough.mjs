@@ -283,6 +283,73 @@ export default async function run({ page, check, errors, URL }) {
   check('and zoom is not something undo steps through', !undoAfterZoom.includes('zoom'), undoAfterZoom)
   await page.getByLabel('Fit to screen').click()
 
+  // --- letters, so the chart can be read without relying on colour at all
+  const lettersPainted = () =>
+    page.evaluate(() => {
+      const canvas = document.querySelector('.stage canvas[data-layer="letters"]')
+      if (!canvas || !canvas.width) return false
+      const w = Math.min(canvas.width, 600)
+      const h = Math.min(canvas.height, 600)
+      const data = canvas.getContext('2d').getImageData(0, 0, w, h).data
+      for (let i = 3; i < data.length; i += 4) if (data[i] > 0) return true
+      return false
+    })
+
+  const lettersToggle = page.getByLabel('Show colour letters')
+  check('there is a way to turn colour letters on', await lettersToggle.isVisible())
+  check.is('and it starts off', await lettersToggle.getAttribute('aria-pressed'), 'false')
+  check('with nothing painted on the letter layer', !(await lettersPainted()))
+
+  // Zoomed right out, a cell is a few pixels across and a letter in it would be grit
+  // on the picture. The app says so rather than leaving a toggle that does nothing.
+  await page.getByLabel('Fit to screen').click()
+  await page.waitForTimeout(200)
+  for (let i = 0; i < 5; i++) {
+    await page.getByLabel('Zoom out').click()
+    await page.waitForTimeout(80)
+  }
+  await lettersToggle.click()
+  await page.waitForTimeout(400)
+  check(
+    'turning them on when the cells are tiny says to zoom in instead',
+    /zoom in/i.test(await page.locator('.stage').innerText()),
+    (await page.locator('.stage').innerText()).trim(),
+  )
+  check('and paints nothing illegible', !(await lettersPainted()))
+
+  for (let i = 0; i < 9; i++) {
+    await page.getByLabel('Zoom in').click()
+    await page.waitForTimeout(80)
+  }
+  await page.waitForTimeout(500)
+  check('zoomed in far enough, the letters appear', await lettersPainted())
+  check(
+    'and the hint goes back to the normal one',
+    /right-hand edge/i.test(await page.locator('.stage').innerText()),
+  )
+
+  const zoomedChart = await readChart(page)
+  check.is(
+    'letters are a way of looking, not an edit',
+    JSON.stringify(await readChart(page)),
+    JSON.stringify(zoomedChart),
+  )
+  const undoWithLetters = await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label')
+  check('so undo does not step through them', !/letter/i.test(undoWithLetters), undoWithLetters)
+
+  await lettersToggle.click()
+  await page.waitForTimeout(400)
+  check('turning them off clears them', !(await lettersPainted()))
+
+  // Making mode is where a chart is actually READ, so the letters belong there too.
+  await page.getByLabel('Make mode').click()
+  await page.waitForTimeout(250)
+  check('the letters toggle is there while making, too', await page.getByLabel('Show colour letters').isVisible())
+  await page.getByLabel('Design mode').click()
+  await page.waitForTimeout(200)
+  await page.getByLabel('Fit to screen').click()
+  await page.waitForTimeout(200)
+
   // --- preview mode strips the workshop, keeps the work
   await page.getByLabel('Preview mode').click()
   await page.waitForTimeout(200)

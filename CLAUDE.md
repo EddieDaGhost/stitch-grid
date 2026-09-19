@@ -73,7 +73,15 @@ ask rather than "improving" it.
    `fit: 'stretch'` is still there for anyone who wants it, named for what it does and
    carrying a warning that says so.
 
-10. **Your place is keyed by the chart, not by a slot.** `loadProgress` is keyed on
+10. **A chart must be readable without relying on colour.** Every cell can carry its
+   key letter — in the PDF since the first version, and on screen since letters got
+   their own layer. A yarn palette is dense in near-neutrals, so Sage and Moss are a
+   guess at arm's length even for someone who sees both perfectly; for the share of
+   people who do not, a colour-only chart is not hard, it is unusable. The letters come
+   from the legend's ranking so the screen, the key and the printed sheet can never call
+   the same colour different things.
+
+11. **Your place is keyed by the chart, not by a slot.** `loadProgress` is keyed on
    `chartHash`, so re-opening the same picture with the same settings lands on the row
    you left, and changing the design gives you a fresh row 1 rather than a position that
    silently means something else. That is what buys persistence with no project file, no
@@ -151,6 +159,11 @@ whether something moved a colour computation into the render loop.
 2D methods it uses, so the preview, the PNG export and a 20-line recording stub in the
 tests all drive identical code.
 
+**The stage is three stacked canvases, and the order is load-bearing.** `data-layer`
+names each one in the markup: `chart` (cells, then the making wash) at the backing
+resolution, `letters` above it at the same resolution so they land exactly on the cells,
+and `grid` on top at the VIEWPORT resolution so hairlines stay hairlines at any zoom.
+
 **Mobile and tablet first, genuinely.** The target is an iPad propped on a craft table and
 a phone in a pocket, operated by someone holding a hook. Tap targets ≥ 44px on *both*
 axes, every field at exactly 16px (smaller makes iOS zoom the page), `touch-action: none`
@@ -227,6 +240,12 @@ The suites worth knowing about:
 - **`innerText` in tests returns the RENDERED text**, so `.label` elements come back
   uppercased by CSS. Match case-insensitively.
 - **Tailwind only keeps classes it can literally see.** No constructed class names.
+- **One `fillText` per cell is the most expensive thing the renderer does.** Measured in
+  Chromium: ~44ms for a 5,000 cell chart, ~350ms for a big one — three to twenty frames.
+  Design mode rebuilds the chart on every tick of the detail slider, so the letters get
+  their OWN canvas layer and their own delayed pass (`LETTER_DELAY_MS` in `Stage.jsx`).
+  Drag a slider and they are simply absent; stop, and they appear. Never move them back
+  into the chart-canvas pass to "simplify" it.
 - **Printed stitch numbers are not working order.** Stitch 1 is the right-hand edge, so
   a right-side row is worked in ascending numbers and a wrong-side row counts DOWN from
   the stitch count. `runRange` is the only place allowed to know that; everywhere else

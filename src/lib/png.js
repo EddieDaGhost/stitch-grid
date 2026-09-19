@@ -5,14 +5,14 @@
  * the thing you were looking at cannot disagree.
  */
 
-import { chartPixelSize, drawChart, drawGrid } from './draw.js'
+import { chartPixelSize, drawChart, drawGrid, drawLetters } from './draw.js'
 
 /**
  * @param cellPx  width of one stitch in the exported image. Height follows from gauge,
  *                so the PNG is a scale drawing of the finished blanket rather than a
  *                square-celled approximation of it.
  */
-export async function chartToPngBlob(chart, { cellPx = 14, grid = false, boldEvery = 10 } = {}) {
+export async function chartToPngBlob(chart, { cellPx = 14, grid = false, letters = null, boldEvery = 10 } = {}) {
   const size = chartPixelSize(chart, cellPx)
   const canvas = document.createElement('canvas')
   canvas.width = size.width
@@ -21,6 +21,9 @@ export async function chartToPngBlob(chart, { cellPx = 14, grid = false, boldEve
   ctx.imageSmoothingEnabled = false
 
   drawChart(ctx, chart, { width: size.width, height: size.height })
+  if (letters) {
+    drawLetters(ctx, chart, { width: size.width, height: size.height, letters })
+  }
   if (grid) {
     drawGrid(ctx, chart, {
       width: size.width,

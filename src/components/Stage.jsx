@@ -12,14 +12,38 @@
 
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
-import { cellHeightFor, drawChart, drawGrid, drawProgressMask, strokeCellRect } from '../lib/draw.js'
+import {
+  cellHeightFor,
+  drawChart,
+  drawGrid,
+  drawLetters,
+  drawProgressMask,
+  strokeCellRect,
+} from '../lib/draw.js'
 
 const MIN_CELL = 2
 const MAX_CANVAS = 4096
+/** Below this a letter is grit on the picture rather than a label. Matches `drawLetters`. */
+const LETTER_MIN_CELL = 8
 
-export default function Stage({ chart, view, setView, showGrid, showRulers, fullBleed, mask, marker }) {
+/**
+ * How long the chart must sit still before the letters are painted.
+ *
+ * One `fillText` per cell is not cheap: measured in Chromium it is about 44ms for a
+ * five thousand cell chart and 350ms for a big one, which is three to twenty frames.
+ * Design mode rebuilds the chart on every tick of the detail slider, so painting them
+ * inline would put the single most expensive thing in the renderer directly on the
+ * interaction path — precisely what the rest of this app is arranged to avoid.
+ *
+ * So they get their own layer and their own pass. Drag a slider and the letters simply
+ * are not there; stop, and they appear. Short enough that a click feels immediate.
+ */
+const LETTER_DELAY_MS = 90
+
+export default function Stage({ chart, view, setView, showGrid, showRulers, fullBleed, mask, marker, letters }) {
   const wrapRef = useRef(null)
   const chartRef = useRef(null)
+  const lettersRef = useRef(null)
   const gridRef = useRef(null)
   const frame = useRef(0)
 
@@ -35,6 +59,9 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
   const backingH = Math.max(1, Math.round(rawH * cap))
   const displayW = Math.max(1, Math.round(rawW))
   const displayH = Math.max(1, Math.round(rawH))
+  const lettersFit =
+    chart.stitches > 0 &&
+    Math.min(backingW / chart.stitches, backingH / chart.rows) >= LETTER_MIN_CELL
 
   useLayoutEffect(() => {
     if (!chart.stitches) return
@@ -97,6 +124,28 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
     }
   }, [chart, backingW, backingH, displayW, displayH, showGrid, mask, marker])
 
+  useEffect(() => {
+    const canvas = lettersRef.current
+    if (!canvas) return
+
+    // Resize first, which also clears. Stale letters sitting over a chart that has
+    // already changed would be actively wrong, and wrong is worse than absent.
+    canvas.width = backingW
+    canvas.height = backingH
+    if (!letters || !chart.stitches) return
+
+    const timer = setTimeout(() => {
+      const ctx = canvas.getContext('2d')
+      drawLetters(ctx, chart, {
+        width: backingW,
+        height: backingH,
+        letters,
+        minCell: LETTER_MIN_CELL,
+      })
+    }, LETTER_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [chart, letters, backingW, backingH])
+
   // Pinch and ctrl-wheel zoom, which is what a tablet user reaches for first.
   useEffect(() => {
     const node = wrapRef.current
@@ -131,13 +180,24 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
         <div className="relative" style={{ width: displayW, height: displayH }}>
           <canvas
             ref={chartRef}
+            data-layer="chart"
             className="chart-canvas absolute inset-0"
             style={{ width: displayW, height: displayH }}
             aria-label={`Chart preview, ${chart.stitches} stitches by ${chart.rows} rows`}
             role="img"
           />
+          {/* Sized to the BACKING canvas, like the chart itself, so the letters land
+              exactly on the cells rather than half a pixel off them at odd zooms. */}
+          <canvas
+            ref={lettersRef}
+            data-layer="letters"
+            className="chart-canvas pointer-events-none absolute inset-0"
+            style={{ width: displayW, height: displayH }}
+            aria-hidden="true"
+          />
           <canvas
             ref={gridRef}
+            data-layer="grid"
             className="pointer-events-none absolute inset-0"
             style={{ width: displayW, height: displayH }}
             aria-hidden="true"
@@ -149,7 +209,9 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
             className="numeral pointer-events-none absolute bottom-1 left-0 right-0 text-center text-[10px]"
             style={{ color: 'var(--ink-3)' }}
           >
-            stitch 1 is the right-hand edge · row 1 is the bottom
+            {letters && !lettersFit
+              ? 'zoom in to read the colour letters'
+              : 'stitch 1 is the right-hand edge · row 1 is the bottom'}
           </div>
         ) : null}
       </div>

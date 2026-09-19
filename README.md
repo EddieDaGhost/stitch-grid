@@ -41,6 +41,8 @@ gauge, so what you see is the shape you'll end up holding.
   long job — it should be spent on the dog, not on the lawn around it
 - A detail slider, showing the stitch count live rather than a pixel size
 - Zoom, and a counting grid with a heavier line every ten stitches
+- A letter in every cell, on demand — so the chart can be read without telling Sage from
+  Moss by eye, which is a guess at arm's length and impossible for some people entirely
 - A border of any width, in inches, added *around* the picture without squashing it
 - Set an exact chart size, and either keep the whole picture, fill the grid by cropping,
   or stretch to fit — filling crops rather than squashing, because squashing turns every
@@ -62,6 +64,7 @@ gauge, so what you see is the shape you'll end up holding.
 - Tick off a colour run at a time, or call the whole row done
 - The chart dims behind you as you go, so you can find your place from across the room
   without reading a number
+- The same per-cell letters are available here, where the chart *is* the instructions
 - Your place is kept per chart, so closing the tab and coming back tomorrow puts you on
   the row you left. Change the design and you get a new chart, and a fresh row 1
 - How far in you are, in stitches and in colour changes still to come — not in minutes,
@@ -72,7 +75,7 @@ gauge, so what you see is the shape you'll end up holding.
 - **Printable PDF**: the chart across as many sheets as it needs, numbered so they tape
   together, with a letter in every cell so it survives a black-and-white printer, the
   stitches numbered right-to-left and the rows numbered up both sides
-- **PNG** of the chart
+- **PNG** of the chart, with the grid and letters if you had them on
 - **Written pattern**, run-length encoded per row, with a running stitch total on every
   line so you catch a miscount two rows later instead of twenty
 - **Corner-to-corner** mode, which reads the same chart on the diagonal

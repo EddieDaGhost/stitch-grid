@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Grid3x3, Undo2, RotateCcw, PanelLeftClose, PanelLeft, Loader2 } from 'lucide-react'
+import { Grid3x3, Type, Undo2, RotateCcw, PanelLeftClose, PanelLeft, Loader2 } from 'lucide-react'
 import Dropzone from './components/Dropzone.jsx'
 import CropPanel from './components/CropPanel.jsx'
 import Make from './components/Make.jsx'
@@ -186,8 +186,12 @@ export default function App() {
     [make, chart, reading],
   )
 
+  /**
+   * Letter per palette index, from the legend's ranking — the same ranking the colour
+   * key and the PDF print, so the chart on screen cannot call a colour something else.
+   */
   const letters = useMemo(() => {
-    const byIndex = {}
+    const byIndex = []
     for (const entry of key) byIndex[entry.index] = entry.letter
     return byIndex
   }, [key])
@@ -195,9 +199,14 @@ export default function App() {
   // --- exports ------------------------------------------------------------
 
   const exportPng = useCallback(async () => {
-    const blob = await chartToPngBlob(chart, { cellPx: 14, grid: view.showGrid })
+    const blob = await chartToPngBlob(chart, {
+      cellPx: 14,
+      grid: view.showGrid,
+      // What you were looking at is what you get, letters included.
+      letters: view.showLetters ? letters : null,
+    })
     if (blob) downloadBlob(blob, suggestName(settings.sourceName, 'chart', 'png'))
-  }, [chart, view.showGrid, settings.sourceName])
+  }, [chart, view.showGrid, view.showLetters, letters, settings.sourceName])
 
   const exportPdf = useCallback(async () => {
     // Yield a frame so the button can show its busy state before we block on a big chart.
@@ -270,16 +279,34 @@ export default function App() {
 
         <div className="ml-auto flex items-center gap-2">
           {designMode || makeMode ? (
-            <button
-              type="button"
-              className="btn-ghost !min-h-11 !px-2.5"
-              aria-label="Show counting grid"
-              aria-pressed={view.showGrid}
-              style={view.showGrid ? { color: 'var(--accent)' } : undefined}
-              onClick={() => setView((v) => ({ ...v, showGrid: !v.showGrid }))}
-            >
-              <Grid3x3 className="h-4 w-4" />
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-ghost !min-h-11 !px-2.5"
+                aria-label="Show counting grid"
+                aria-pressed={view.showGrid}
+                style={view.showGrid ? { color: 'var(--accent)' } : undefined}
+                onClick={() => setView((v) => ({ ...v, showGrid: !v.showGrid }))}
+              >
+                <Grid3x3 className="h-4 w-4" />
+              </button>
+              {/*
+                Letters are how the chart stays readable without relying on colour at
+                all — the same reason the PDF has printed them from the first version.
+                Off by default: in design mode you are judging how the picture reads,
+                and a grid of letters over it gets in the way of exactly that.
+              */}
+              <button
+                type="button"
+                className="btn-ghost !min-h-11 !px-2.5"
+                aria-label="Show colour letters"
+                aria-pressed={view.showLetters}
+                style={view.showLetters ? { color: 'var(--accent)' } : undefined}
+                onClick={() => setView((v) => ({ ...v, showLetters: !v.showLetters }))}
+              >
+                <Type className="h-4 w-4" />
+              </button>
+            </>
           ) : null}
           {makeMode ? null : (
             <>
@@ -338,6 +365,7 @@ export default function App() {
             fullBleed={view.mode === 'preview'}
             mask={mask}
             marker={reading.mode === 'c2c' ? null : marker}
+            letters={view.showLetters && (designMode || makeMode) ? letters : null}
           />
           {makeMode ? null : <Summary dim={dim} joins={joins} unit={settings.gauge.unit} />}
         </div>

@@ -10,6 +10,9 @@ export function recordingContext() {
   let fillStyle = null
   let strokeStyle = null
   let lineWidth = 1
+  let font = null
+  let textAlign = null
+  let textBaseline = null
   let path = []
 
   return {
@@ -37,6 +40,28 @@ export function recordingContext() {
     },
     fillRect(x, y, w, h) {
       ops.push({ op: 'fillRect', x, y, w, h, fill: fillStyle })
+    },
+    get font() {
+      return font
+    },
+    set font(v) {
+      font = v
+      ops.push({ op: 'font', value: v })
+    },
+    get textAlign() {
+      return textAlign
+    },
+    set textAlign(v) {
+      textAlign = v
+    },
+    get textBaseline() {
+      return textBaseline
+    },
+    set textBaseline(v) {
+      textBaseline = v
+    },
+    fillText(text, x, y) {
+      ops.push({ op: 'fillText', text, x, y, fill: fillStyle, font, textAlign, textBaseline })
     },
     beginPath() {
       path = []

@@ -7,7 +7,7 @@
  * "the cells tile with no gap and no overlap" in bare Node.
  */
 
-import { rgbToHex } from './color.js'
+import { inkOn, rgbToHex } from './color.js'
 
 /**
  * Integer boundaries for `count` cells across `sizePx` pixels.
@@ -54,6 +54,70 @@ export function drawChart(ctx, chart, { width, height, originX = 0, originY = 0 
       }
       ctx.fillRect(originX + xs[x], top, xs[end] - xs[x], bottom - top)
       x = end
+    }
+  }
+}
+
+/**
+ * A letter in every cell.
+ *
+ * The PDF has done this since the first version, for a reason stated there: a chart is
+ * often followed in black and white, and by someone who cannot reliably tell Sage from
+ * Moss at a glance. Both halves of that are just as true on a screen — more so in
+ * making mode, where the chart IS the instructions and a misread cell is a row to
+ * unpick. A colour-only chart is also simply unusable for a good share of people, and
+ * the app already knew how to fix that in print and not on screen.
+ *
+ * Letters are passed in rather than derived, so the screen and the printed sheet read
+ * from the same ranking and cannot drift into calling the same colour different things.
+ *
+ * Below `minCell` nothing is drawn. A letter squeezed into six pixels is not a letter,
+ * it is grit on the picture you are trying to judge — the same argument that stops
+ * `drawGrid` hairlining every cell when it is zoomed out.
+ */
+export function drawLetters(
+  ctx,
+  chart,
+  {
+    width,
+    height,
+    originX = 0,
+    originY = 0,
+    letters,
+    minCell = 8,
+    font = "ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+  },
+) {
+  if (!letters) return
+  const cellW = width / chart.stitches
+  const cellH = height / chart.rows
+  if (Math.min(cellW, cellH) < minCell) return
+
+  const xs = cellEdges(chart.stitches, width)
+  const ys = cellEdges(chart.rows, height)
+  const size = Math.max(1, Math.round(Math.min(cellW, cellH) * 0.62))
+
+  ctx.font = `600 ${size}px ${font}`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  // Black or white per colour, and set only when it changes — on a photo chart the
+  // runs are long, so this flips a handful of times per row rather than once per cell.
+  let currentFill = null
+  for (let y = 0; y < chart.rows; y++) {
+    const midY = originY + (ys[y] + ys[y + 1]) / 2
+    for (let x = 0; x < chart.stitches; x++) {
+      const index = chart.cells[y * chart.stitches + x]
+      const letter = letters[index]
+      const colour = chart.palette[index]
+      if (!letter || !colour) continue
+
+      const ink = rgbToHex(inkOn(colour.rgb))
+      if (ink !== currentFill) {
+        ctx.fillStyle = ink
+        currentFill = ink
+      }
+      ctx.fillText(letter, originX + (xs[x] + xs[x + 1]) / 2, midY)
     }
   }
 }
