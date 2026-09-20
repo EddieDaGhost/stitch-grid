@@ -84,6 +84,25 @@ export default async function run({ page, check, errors, URL }) {
   const initial = await readChart(page)
   check('a chart appears with real dimensions', initial && initial.stitches > 2 && initial.rows > 2, JSON.stringify(initial))
 
+  /*
+    A newly opened picture is fitted to the stage rather than drawn at a fixed zoom.
+    Eight pixels a stitch left every chart the same size whatever the screen and
+    whatever the chart: a stamp in a field of grey, with the counting grid already
+    below its own legibility floor on the short axis. That reads as a blurry chart.
+  */
+  const firstStage = await page.locator('.stage').boundingBox()
+  const firstChart = await page.getByRole('img', { name: /Chart preview/ }).boundingBox()
+  check(
+    'the chart is fitted to the stage when a picture is opened',
+    firstChart.width / firstStage.width > 0.6,
+    `chart ${Math.round(firstChart.width)} in stage ${Math.round(firstStage.width)}`,
+  )
+  check(
+    'and fitted inside it rather than spilling out',
+    firstChart.width <= firstStage.width + 1 && firstChart.height <= firstStage.height + 1,
+    `${Math.round(firstChart.width)}x${Math.round(firstChart.height)} in ${Math.round(firstStage.width)}x${Math.round(firstStage.height)}`,
+  )
+
   // A square photo at single crochet gauge needs MORE rows than stitches, because rows
   // are shorter than stitches are wide. This is the whole product in one assertion.
   check(

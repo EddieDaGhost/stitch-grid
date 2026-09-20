@@ -253,4 +253,68 @@ export default async function run({ check }) {
     key.every((entry) => entry.letter === chartLetter(entry.index)),
     key.map((e) => `${e.index}:${e.letter}`).join(' '),
   )
+  /*
+    --- lines must land on whole pixels, at any resolution
+
+    A stroke straddles its coordinate. One pixel wide it lands cleanly when centred on
+    a half coordinate; two wide, on a whole one. The grid used to add a flat +0.5 to
+    everything, which was right only while every line was exactly one device pixel —
+    and stopped being right the moment the canvas started being drawn at the screen's
+    real resolution, where the thin lines are two device pixels and the bold ones four.
+    A line across a pixel boundary is not thin, it is grey and smeared.
+  */
+  const strokeGroups = (ops) => {
+    const groups = []
+    let pending = []
+    for (const op of ops) {
+      if (op.op === 'segment') pending.push(op)
+      else if (op.op === 'stroke') {
+        groups.push({ lineWidth: op.lineWidth, segments: pending })
+        pending = []
+      }
+    }
+    return groups
+  }
+  // A vertical line's aligned axis is x; a horizontal one's is y. The other endpoint
+  // sits on the canvas edge, which is how they are told apart.
+  const alignedValues = (group, width, height) =>
+    group.segments.map((seg) => (Math.abs(seg.y - height) < 1e-9 ? seg.x : seg.y))
+  const offsetOf = (v) => ((v % 1) + 1) % 1
+
+  const gridChart = chartOf(20, 24, () => 0)
+  for (const [lineWidth, thinOffset, boldOffset] of [
+    [1, 0.5, 0],
+    [2, 0, 0],
+    [3, 0.5, 0],
+  ]) {
+    const ctx2 = recordingContext()
+    drawGrid(ctx2, gridChart, { width: 400, height: 480, lineWidth })
+    const groups = strokeGroups(ctx2.ops)
+    const thinGroup = groups.find((g) => g.lineWidth === lineWidth)
+    const boldGroup = groups.find((g) => g.lineWidth === lineWidth * 2)
+    check(
+      `at ${lineWidth}px, thin lines sit where a ${lineWidth}px stroke lands cleanly`,
+      thinGroup && alignedValues(thinGroup, 400, 480).every((v) => Math.abs(offsetOf(v) - thinOffset) < 1e-9),
+      thinGroup ? String(alignedValues(thinGroup, 400, 480)[0]) : 'no thin group',
+    )
+    check(
+      `and the bold ones where a ${lineWidth * 2}px stroke does`,
+      boldGroup && alignedValues(boldGroup, 400, 480).every((v) => Math.abs(offsetOf(v) - boldOffset) < 1e-9),
+      boldGroup ? String(alignedValues(boldGroup, 400, 480)[0]) : 'no bold group',
+    )
+  }
+
+  // The legibility floor travels in the caller's units, so a device-pixel canvas can
+  // ask for the same apparent size by scaling the number it passes.
+  const denseCtx = recordingContext()
+  drawGrid(denseCtx, gridChart, { width: 400, height: 480, minCell: 6 })
+  check.is('at twenty pixels a cell every line is drawn', strokeGroups(denseCtx.ops).length, 2)
+  const sparseCtx = recordingContext()
+  drawGrid(sparseCtx, gridChart, { width: 400, height: 480, minCell: 40 })
+  check.is('but raising the floor above the cell size drops the thin ones', strokeGroups(sparseCtx.ops).length, 1)
+  check.is(
+    'leaving only the every-ten lines you actually count by',
+    strokeGroups(sparseCtx.ops)[0].lineWidth,
+    2,
+  )
 }

@@ -366,6 +366,9 @@ export default function App() {
             mask={mask}
             marker={reading.mode === 'c2c' ? null : marker}
             letters={view.showLetters && (designMode || makeMode) ? letters : null}
+            /* Changes only when a new picture is opened, which is the one moment the
+               stage should choose the zoom rather than the person. */
+            fitKey={source.id}
           />
           {makeMode ? null : <Summary dim={dim} joins={joins} unit={settings.gauge.unit} />}
         </div>

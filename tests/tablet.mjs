@@ -101,6 +101,32 @@ export default async function run({ browser, check, URL }) {
       check(`${device.label}: the chart is on screen`, canvas && canvas.width > 40 && canvas.height > 40)
 
       /*
+        Every canvas is drawn at the SCREEN's resolution, not at CSS pixels.
+
+        These contexts run at deviceScaleFactor 2, which is what the target devices
+        actually are. A canvas sized in CSS pixels gets stretched to twice its
+        resolution by the browser, and every counting-grid hairline becomes a soft
+        two-pixel smear — on a tablet, which is the whole point of the app. Nothing
+        checked this before, so it was invisible for as long as it existed.
+      */
+      const resolution = await page.evaluate(() => {
+        const layers = {}
+        for (const layer of ['chart', 'letters', 'grid']) {
+          const canvas = document.querySelector(`.stage canvas[data-layer="${layer}"]`)
+          if (canvas) layers[layer] = { backing: canvas.width, css: canvas.clientWidth }
+        }
+        return { dpr: window.devicePixelRatio, layers }
+      })
+      check(`${device.label}: the page really is a high-density one`, resolution.dpr >= 2, String(resolution.dpr))
+      for (const [layer, size] of Object.entries(resolution.layers)) {
+        check(
+          `${device.label}: the ${layer} canvas holds ${resolution.dpr}x the pixels it is shown at`,
+          size.css > 0 && Math.abs(size.backing - size.css * resolution.dpr) <= 2,
+          `${size.backing} backing for ${size.css} css`,
+        )
+      }
+
+      /*
         And the viewport HOLDING the chart is a usable size. Stacked under a panel column
         taller than the screen, a fixed-height layout gives the stage whatever is left
         over — which is nothing, so the chart ends up a sliver with the canvas spilling

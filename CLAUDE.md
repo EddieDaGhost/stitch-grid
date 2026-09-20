@@ -160,9 +160,17 @@ whether something moved a colour computation into the render loop.
 tests all drive identical code.
 
 **The stage is three stacked canvases, and the order is load-bearing.** `data-layer`
-names each one in the markup: `chart` (cells, then the making wash) at the backing
-resolution, `letters` above it at the same resolution so they land exactly on the cells,
-and `grid` on top at the VIEWPORT resolution so hairlines stay hairlines at any zoom.
+names each one in the markup: `chart` (cells, then the making wash), `letters` above it,
+and `grid` on top. All three share ONE backing size, so a letter lands exactly on its
+cell and a grid line exactly on a cell boundary; sized independently they drift apart by
+half a pixel at awkward zooms.
+
+**Canvas backing stores are in DEVICE pixels, never CSS pixels.** `Stage.jsx` multiplies
+by `devicePixelRatio` (capped at `MAX_DPR`, and still bounded by `MAX_CANVAS` so a deep
+zoom cannot ask for a canvas the browser refuses). Anything measured for legibility —
+a grid line's width, the floor below which letters or hairlines stop being drawn — is
+then scaled by the caller so the rule still means the same apparent size. Get this wrong
+and nothing throws; the chart just comes back soft on every device the app is for.
 
 **Mobile and tablet first, genuinely.** The target is an iPad propped on a craft table and
 a phone in a pocket, operated by someone holding a hook. Tap targets ≥ 44px on *both*
@@ -236,6 +244,17 @@ The suites worth knowing about:
   guard downstream then silently treats the photo as square — so the app charts a 3:2
   photo into a square blanket and nothing anywhere throws. This shipped once and was
   invisible because every browser fixture was square.
+- **A canvas sized in CSS pixels is half resolution on a retina screen.** `canvas.width`
+  is the backing store; the CSS width is how big it is drawn. Set them equal and the
+  browser stretches every hairline into a soft two-pixel smear — which is what the app
+  did on every phone and tablet for its whole life, invisibly, because nothing asserted
+  on canvas resolution. `tests/tablet.mjs` now runs at `deviceScaleFactor: 2` and checks
+  every layer holds `dpr` times the pixels it is shown at.
+- **A stroke straddles its coordinate, so line alignment depends on its WIDTH.** An odd
+  width lands on whole pixels when centred on a half coordinate, an even one when
+  centred on a whole coordinate. `drawGrid` derives the offset from `lineWidth` rather
+  than adding a flat `+0.5`; that constant was correct only while every line was exactly
+  one device pixel wide.
 - **The summed-area table must be `Float64Array`.** A 1024² image sums past 6×10¹⁰, which
   overflows a uint32 and silently corrupts the bottom-right quadrant.
 - **Crochet row 1 is the BOTTOM row**, and odd rows read the cells array reversed. That
