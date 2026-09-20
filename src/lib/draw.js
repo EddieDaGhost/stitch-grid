@@ -132,7 +132,17 @@ export function drawLetters(
 export function drawGrid(
   ctx,
   chart,
-  { width, height, originX = 0, originY = 0, boldEvery = 10, line = '#00000022', bold = '#00000055', lineWidth = 1 },
+  {
+    width,
+    height,
+    originX = 0,
+    originY = 0,
+    boldEvery = 10,
+    line = '#00000022',
+    bold = '#00000055',
+    lineWidth = 1,
+    minCell = 6,
+  },
 ) {
   const xs = cellEdges(chart.stitches, width)
   const ys = cellEdges(chart.rows, height)
@@ -142,10 +152,25 @@ export function drawGrid(
    * and becomes a grey veil over the picture — you can no longer see the design you are
    * supposed to be judging. Zoomed out, only the tens are drawn; they're the ones you
    * actually count by anyway.
+   *
+   * `minCell` is in the same units as `width`, so a caller drawing at device pixels on
+   * a 2x screen passes twice the number and the rule still means six CSS pixels.
    */
   const cellW = width / chart.stitches
   const cellH = height / chart.rows
-  const showEveryCell = Math.min(cellW, cellH) >= 6
+  const showEveryCell = Math.min(cellW, cellH) >= minCell
+
+  /**
+   * A stroke straddles its coordinate, half to each side. So a line of ODD width lands
+   * on whole pixels when centred on a half coordinate, and an EVEN one when centred on
+   * a whole coordinate. Hardcoding +0.5 was right only while every line was exactly one
+   * pixel wide — at device-pixel resolution the thin lines are two wide and the bold
+   * ones four, and the old offset put every one of them across a pixel boundary, which
+   * is the soft grey haze this replaces.
+   */
+  const alignFor = (w) => (Math.max(1, Math.round(w)) % 2) / 2
+  const thinAlign = alignFor(lineWidth)
+  const boldAlign = alignFor(lineWidth * 2)
 
   const stroke = (colour, w, segments) => {
     ctx.strokeStyle = colour
@@ -161,17 +186,18 @@ export function drawGrid(
   const thin = []
   const heavy = []
   for (let i = 0; i <= chart.stitches; i++) {
-    // +0.5 keeps a 1px line on a pixel centre instead of straddling two.
-    const x = originX + xs[i] + 0.5
+    const isHeavy = i % boldEvery === 0 || i === chart.stitches
+    const x = originX + xs[i] + (isHeavy ? boldAlign : thinAlign)
     const seg = [x, originY, x, originY + height]
-    ;(i % boldEvery === 0 || i === chart.stitches ? heavy : thin).push(seg)
+    ;(isHeavy ? heavy : thin).push(seg)
   }
   for (let i = 0; i <= chart.rows; i++) {
-    const y = originY + ys[i] + 0.5
-    const seg = [originX, y, originX + width, y]
     // Bold lines are counted from the BOTTOM, because row 1 is the bottom row.
     const fromBottom = chart.rows - i
-    ;(fromBottom % boldEvery === 0 || i === 0 || i === chart.rows ? heavy : thin).push(seg)
+    const isHeavy = fromBottom % boldEvery === 0 || i === 0 || i === chart.rows
+    const y = originY + ys[i] + (isHeavy ? boldAlign : thinAlign)
+    const seg = [originX, y, originX + width, y]
+    ;(isHeavy ? heavy : thin).push(seg)
   }
 
   if (thin.length && showEveryCell) stroke(line, lineWidth, thin)

@@ -1,16 +1,21 @@
 /**
  * The chart on screen.
  *
- * Two stacked canvases. The chart canvas is sized in whole cells and drawn with
- * nearest-neighbour scaling — the chart genuinely IS made of blocks, so pixelated
- * upscaling is the correct rendering rather than a compromise. The grid is a separate
- * canvas sized to the VIEWPORT, so its hairlines stay hairlines at any zoom instead of
- * thickening along with a CSS transform.
+ * Three stacked canvases, all sharing one backing store measured in DEVICE pixels:
+ * `chart` (the cells, then the making wash), `letters` above it, and `grid` on top.
+ * Sharing the size is what makes a letter land exactly on its cell and a grid line
+ * exactly on a cell boundary — computed independently they drift apart by half a pixel
+ * at awkward zooms.
+ *
+ * Device pixels rather than CSS pixels because a canvas sized in CSS pixels is stretched
+ * by the browser on any dense screen, which is every phone and tablet this is built for.
+ * The chart survives that (its cells are blocks, and `image-rendering: pixelated` is the
+ * right rendering for them), but hairlines and letters do not: they come back soft.
  *
  * Zoom never rebuilds the chart. It only changes how many screen pixels one stitch gets.
  */
 
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import {
   cellHeightFor,
@@ -23,6 +28,17 @@ import {
 
 const MIN_CELL = 2
 const MAX_CANVAS = 4096
+
+/**
+ * Cap on how much resolution to buy from a dense screen.
+ *
+ * Three covers every phone worth covering; beyond that the memory is real and the
+ * difference is not.
+ */
+const MAX_DPR = 3
+
+/** A cell must be at least this many CSS pixels before the grid draws every line. */
+const GRID_MIN_CELL = 6
 /** Below this a letter is grit on the picture rather than a label. Matches `drawLetters`. */
 const LETTER_MIN_CELL = 8
 
@@ -40,28 +56,53 @@ const LETTER_MIN_CELL = 8
  */
 const LETTER_DELAY_MS = 90
 
-export default function Stage({ chart, view, setView, showGrid, showRulers, fullBleed, mask, marker, letters }) {
+export default function Stage({
+  chart,
+  view,
+  setView,
+  showGrid,
+  showRulers,
+  fullBleed,
+  mask,
+  marker,
+  letters,
+  fitKey,
+}) {
   const wrapRef = useRef(null)
   const chartRef = useRef(null)
   const lettersRef = useRef(null)
   const gridRef = useRef(null)
   const frame = useRef(0)
 
+  const dpr = Math.min(MAX_DPR, Math.max(1, useDevicePixelRatio()))
+
   const cellW = Math.max(MIN_CELL, view.zoom * 8)
   const cellH = cellHeightFor(cellW, chart.gauge)
 
-  // Cap the backing canvas and let CSS scale beyond it, so a deep zoom never tries to
-  // allocate a 20,000 pixel canvas.
+  /*
+    Two sizes, and keeping them apart is the whole of it.
+
+    `display` is CSS pixels — how big the chart looks. `backing` is DEVICE pixels — how
+    many the canvas actually holds. A canvas sized in CSS pixels on a 2x screen is
+    stretched to twice its resolution by the browser, which turns every counting-grid
+    hairline into a soft two-pixel smear. Since the target device is a tablet, that was
+    the normal case rather than an edge one.
+
+    The cap still binds: a deep zoom asks for more than any browser will allocate, so
+    past that point resolution is traded away rather than the canvas failing outright.
+  */
   const rawW = chart.stitches * cellW
   const rawH = chart.rows * cellH
-  const cap = Math.min(1, MAX_CANVAS / Math.max(rawW, rawH, 1))
-  const backingW = Math.max(1, Math.round(rawW * cap))
-  const backingH = Math.max(1, Math.round(rawH * cap))
+  const scale = Math.min(dpr, MAX_CANVAS / Math.max(rawW, rawH, 1))
+  const backingW = Math.max(1, Math.round(rawW * scale))
+  const backingH = Math.max(1, Math.round(rawH * scale))
   const displayW = Math.max(1, Math.round(rawW))
   const displayH = Math.max(1, Math.round(rawH))
-  const lettersFit =
-    chart.stitches > 0 &&
-    Math.min(backingW / chart.stitches, backingH / chart.rows) >= LETTER_MIN_CELL
+
+  // Whole device pixels, so the parity trick in `drawGrid` can land lines cleanly.
+  const lineScale = Math.max(1, Math.round(scale))
+  // The legibility floors are about apparent size, so they stay in CSS pixels.
+  const lettersFit = chart.stitches > 0 && Math.min(cellW, cellH) >= LETTER_MIN_CELL
 
   useLayoutEffect(() => {
     if (!chart.stitches) return
@@ -94,27 +135,29 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
 
       const grid = gridRef.current
       if (grid) {
-        grid.width = displayW
-        grid.height = displayH
+        grid.width = backingW
+        grid.height = backingH
         const ctx = grid.getContext('2d')
-        ctx.clearRect(0, 0, displayW, displayH)
+        ctx.clearRect(0, 0, backingW, backingH)
         if (showGrid) {
           const style = getComputedStyle(document.documentElement)
           drawGrid(ctx, chart, {
-            width: displayW,
-            height: displayH,
+            width: backingW,
+            height: backingH,
             line: style.getPropertyValue('--grid-line').trim() || 'rgba(0,0,0,0.16)',
             bold: style.getPropertyValue('--grid-bold').trim() || 'rgba(0,0,0,0.42)',
+            lineWidth: lineScale,
+            minCell: GRID_MIN_CELL * scale,
           })
         }
         if (marker) {
           const style = getComputedStyle(document.documentElement)
           strokeCellRect(ctx, chart, {
-            width: displayW,
-            height: displayH,
+            width: backingW,
+            height: backingH,
             rect: marker,
             colour: style.getPropertyValue('--accent').trim() || '#2b7977',
-            lineWidth: 3,
+            lineWidth: 3 * lineScale,
           })
         }
       }
@@ -122,7 +165,7 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
     return () => {
       if (frame.current) cancelAnimationFrame(frame.current)
     }
-  }, [chart, backingW, backingH, displayW, displayH, showGrid, mask, marker])
+  }, [chart, backingW, backingH, showGrid, mask, marker, lineScale, scale])
 
   useEffect(() => {
     const canvas = lettersRef.current
@@ -140,11 +183,11 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
         width: backingW,
         height: backingH,
         letters,
-        minCell: LETTER_MIN_CELL,
+        minCell: LETTER_MIN_CELL * scale,
       })
     }, LETTER_DELAY_MS)
     return () => clearTimeout(timer)
-  }, [chart, letters, backingW, backingH])
+  }, [chart, letters, backingW, backingH, scale])
 
   // Pinch and ctrl-wheel zoom, which is what a tablet user reaches for first.
   useEffect(() => {
@@ -159,14 +202,34 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
     return () => node.removeEventListener('wheel', onWheel)
   }, [setView])
 
-  const fit = () => {
+  const fit = useCallback(() => {
     const node = wrapRef.current
     if (!node || !chart.stitches) return
     const padding = 32
     const zoomX = (node.clientWidth - padding) / (chart.stitches * 8)
     const zoomY = (node.clientHeight - padding) / (chart.rows * cellHeightFor(8, chart.gauge))
     setView((v) => ({ ...v, zoom: clampZoom(Math.min(zoomX, zoomY)) }))
-  }
+  }, [chart.stitches, chart.rows, chart.gauge, setView])
+
+  /**
+   * Fit a newly loaded picture to the stage.
+   *
+   * A fixed starting zoom meant every chart opened at eight pixels a stitch whatever
+   * its size and whatever the screen was: a small chart sat as a stamp in a field of
+   * grey, and a large one spilled off the edge. Eight pixels is also below the grid's
+   * own legibility floor on the short axis at most gauges, so the counting grid was
+   * half-drawn on arrival too — which reads as a blurry chart rather than a small one.
+   *
+   * Keyed on the picture, not the chart, so it happens once when you open something and
+   * never fights the zoom you chose afterwards. Zoom is a way of looking, so this stays
+   * out of undo like the rest of the view.
+   */
+  const fitted = useRef(null)
+  useLayoutEffect(() => {
+    if (!fitKey || !chart.stitches || fitted.current === fitKey) return
+    fitted.current = fitKey
+    fit()
+  }, [fitKey, chart.stitches, fit])
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col gap-2">
@@ -191,7 +254,7 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
           <canvas
             ref={lettersRef}
             data-layer="letters"
-            className="chart-canvas pointer-events-none absolute inset-0"
+            className="pointer-events-none absolute inset-0"
             style={{ width: displayW, height: displayH }}
             aria-hidden="true"
           />
@@ -244,4 +307,27 @@ export default function Stage({ chart, view, setView, showGrid, showRulers, full
 
 function clampZoom(z) {
   return Math.min(16, Math.max(0.15, z))
+}
+
+/**
+ * The screen's pixel density, kept current when a window moves between displays.
+ *
+ * There is no `devicePixelRatio` change event. The standard way round it is to watch a
+ * media query pinned to the ratio you currently believe in, and re-arm it the moment it
+ * stops matching — which is what the dependency on `dpr` below does.
+ */
+function useDevicePixelRatio() {
+  const [dpr, setDpr] = useState(() =>
+    typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1,
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const media = window.matchMedia(`(resolution: ${dpr}dppx)`)
+    const onChange = () => setDpr(window.devicePixelRatio || 1)
+    media.addEventListener?.('change', onChange)
+    return () => media.removeEventListener?.('change', onChange)
+  }, [dpr])
+
+  return dpr
 }
