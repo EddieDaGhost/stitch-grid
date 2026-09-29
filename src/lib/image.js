@@ -63,6 +63,15 @@ export async function loadSource(file) {
 
   const canvas = makeCanvas(width, height)
   const ctx = canvas.getContext('2d')
+  /*
+    The LAST reduction needs the good filter just as much as the halving steps above do.
+    Left at the default, this one step is a cheap box-ish filter, and what it leaves
+    behind is per-pixel noise along every edge — which the quantizer then turns into
+    single stray stitches of an invented colour. The halving loop was already asking for
+    'high'; this call, the one that actually lands on the working size, was not.
+  */
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(source, 0, 0, width, height)
   const imageData = ctx.getImageData(0, 0, width, height)
   bitmap.close?.()

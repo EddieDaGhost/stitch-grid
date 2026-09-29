@@ -3,9 +3,13 @@
  */
 
 import {
+  MAX_EXPORT_EDGE,
+  MAX_EXPORT_PIXELS,
+  MIN_EXPORT_CELL,
   cellEdges,
   cellHeightFor,
   chartPixelSize,
+  exportCellPx,
   drawChart,
   drawGrid,
   drawLetters,
@@ -27,6 +31,90 @@ function chartOf(stitches, rows, fn) {
 }
 
 export default async function run({ check }) {
+  /*
+    --- how big an exported image should be
+
+    The export was a flat fourteen pixels a stitch, which is where "the downloaded file
+    looks softer than the screen did" came from: a sixty-stitch chart is 840px wide, so
+    anyone who zoomed in, viewed it on a dense screen or printed it was looking at an
+    image stretched well past its own size. Nothing in the chart was wrong; there were
+    not enough pixels in the file to draw it.
+
+    Two properties matter. The file has to be big enough to stand being looked at
+    closely, and — the one that actually reads as sharpness — every cell in it should be
+    exactly the same size. A cell's height is its width times the gauge aspect, so at
+    fourteen pixels and a 16/18 gauge a row is 12.44 pixels tall and the rounding gives
+    rows of 12 and 13 alternating. Rows of two different heights look blurry however
+    crisp each individual cell is.
+
+    And it must stay inside what a browser will actually allocate, which on an iPad is
+    about sixteen million pixels and is refused as a BLANK image rather than an error.
+  */
+  {
+    const gauges = [
+      { stitchesPer4: 16, rowsPer4: 18, unit: 'in' },
+      { stitchesPer4: 14, rowsPer4: 12, unit: 'in' },
+      { stitchesPer4: 12, rowsPer4: 7, unit: 'in' },
+      { stitchesPer4: 12, rowsPer4: 12, unit: 'in' },
+    ]
+    // Chart sizes people actually make, from a coaster to a big throw.
+    const shapes = [[8, 9], [40, 45], [60, 68], [120, 135]]
+    let big = true
+    let uniform = true
+    let coarser = 0
+
+    for (const gauge of gauges) {
+      for (const [stitches, rows] of shapes) {
+        const chart = { stitches, rows, gauge, cells: new Uint8Array(0), palette: [], meta: {} }
+        const cell = exportCellPx(chart)
+        const size = chartPixelSize(chart, cell)
+
+        if (cell < MIN_EXPORT_CELL) coarser++
+        // Big enough to be looked at closely: it reached the target edge, or it is being
+        // held back by the cap on how big a cell is worth drawing.
+        if (Math.max(size.width, size.height) < 1200 && cell < MIN_EXPORT_CELL * 3) big = false
+
+        const xs = cellEdges(stitches, size.width)
+        const ys = cellEdges(rows, size.height)
+        const w0 = xs[1] - xs[0]
+        const h0 = ys[1] - ys[0]
+        for (let i = 1; i < stitches; i++) if (xs[i + 1] - xs[i] !== w0) uniform = false
+        for (let i = 1; i < rows; i++) if (ys[i + 1] - ys[i] !== h0) uniform = false
+      }
+    }
+    check('an exported chart has enough pixels to be looked at closely', big)
+    check('every cell of an exported chart is exactly the same size', uniform)
+    check.is('and never coarser than the old fixed export', coarser, 0)
+
+    /*
+      The extremes, where the only rule that still holds is the one about what the device
+      will allocate. A 250 x 400 chart at the old fourteen pixels a stitch asked for
+      nineteen million, which an iPad hands back blank.
+    */
+    let withinLimits = true
+    const extremes = [[250, 400], [250, 40], [2, 400], [1, 1]]
+    for (const gauge of [...gauges, { stitchesPer4: 13, rowsPer4: 37, unit: 'in' }]) {
+      for (const [stitches, rows] of [...shapes, ...extremes]) {
+        const chart = { stitches, rows, gauge, cells: new Uint8Array(0), palette: [], meta: {} }
+        const size = chartPixelSize(chart, exportCellPx(chart))
+        if (Math.max(size.width, size.height) > MAX_EXPORT_EDGE) withinLimits = false
+        if (size.width * size.height > MAX_EXPORT_PIXELS) withinLimits = false
+      }
+    }
+    check('no exported image asks for a canvas the browser would refuse', withinLimits)
+
+    // The gauge that ships, spelled out: 45px cells make rows exactly 40px tall.
+    const sc = { stitchesPer4: 16, rowsPer4: 18, unit: 'in' }
+    const chart = { stitches: 60, rows: 68, gauge: sc, cells: new Uint8Array(0), palette: [], meta: {} }
+    const cell = exportCellPx(chart)
+    check.is('a default-gauge cell height is a whole number of pixels', cellHeightFor(cell, sc) % 1, 0)
+    check(
+      'and the export holds several times the pixels the old one did',
+      cell >= MIN_EXPORT_CELL * 2,
+      `${cell}px a stitch, was ${MIN_EXPORT_CELL}`,
+    )
+  }
+
   // --- cell edges
   const edges = cellEdges(84, 1008)
   check.is('edges start at zero', edges[0], 0)

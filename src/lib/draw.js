@@ -305,3 +305,127 @@ export function strokeCellRect(
   ctx.lineTo(left, top)
   ctx.stroke()
 }
+
+/**
+ * How many pixels wide one stitch should be in an exported image.
+ *
+ * The export used to be a flat fourteen pixels a stitch whatever the chart was, which
+ * is where "the file looks soft" came from: a sixty-stitch chart came out 840px wide,
+ * so anybody who opened it on a dense screen, zoomed in to read a colour letter, or
+ * sent it to a printer was looking at an image being stretched two or three times its
+ * own size. Nothing in the chart was wrong; there simply were not enough pixels in the
+ * file to draw it.
+ *
+ * So the size is chosen from the chart instead: aim the LONGER edge at `targetEdge`,
+ * never go coarser than the old fourteen, and stop at a ceiling so a big chart cannot
+ * ask for a canvas the browser refuses.
+ *
+ * Then the important part — the snap. A cell's height is its width times the gauge
+ * aspect, so at fourteen pixels and a 16/18 gauge a row is 12.44 pixels tall, and
+ * `cellEdges` has to round: rows come out 12 or 13 pixels, alternating, and a picture
+ * drawn on rows of two different heights reads as blurry even though every cell is
+ * perfectly sharp. Choosing a width that makes the height land on a whole number
+ * removes that entirely — every cell in the file is then exactly the same size, at
+ * exactly the gauge aspect.
+ */
+export const MIN_EXPORT_CELL = 14
+export const MAX_EXPORT_CELL = 64
+/** What the long edge of an exported image aims for. About a 2400px-wide poster. */
+export const EXPORT_TARGET_EDGE = 2400
+/** No exported edge may pass this; browsers refuse a canvas not far above it. */
+export const MAX_EXPORT_EDGE = 8192
+/**
+ * And no exported image may pass this many pixels in total.
+ *
+ * Safari on an iPad has long refused a canvas above about sixteen million pixels, and
+ * refuses it by handing back a blank one rather than by throwing — so the old fixed
+ * fourteen pixels a stitch did not merely look soft on the largest charts, it produced
+ * an empty file on the exact device this app is built for. A 250 x 400 chart at fourteen
+ * pixels asks for nineteen million.
+ */
+export const MAX_EXPORT_PIXELS = 16_000_000
+
+const gcd = (a, b) => (b ? gcd(b, a % b) : a)
+
+/**
+ * The smallest cell width that makes the cell HEIGHT a whole number of pixels.
+ *
+ * `cellHeight = cellWidth * stitchesPer4 / rowsPer4`, so the height is an integer
+ * exactly when the width is a multiple of `rowsPer4 / gcd(stitchesPer4, rowsPer4)`.
+ * For the default 16/18 gauge that is 9 — so 36, 45 or 54 pixels a stitch all give
+ * rows of exactly 32, 40 or 48 pixels, with no rounding anywhere.
+ *
+ * Returns 1 for a gauge that is not a pair of whole numbers, which means "no snap".
+ */
+export function uniformCellStep(gauge) {
+  const s = gauge?.stitchesPer4
+  const r = gauge?.rowsPer4
+  if (!(s > 0 && r > 0) || s !== Math.round(s) || r !== Math.round(r)) return 1
+  return r / gcd(s, r)
+}
+
+export function exportCellPx(
+  chart,
+  {
+    targetEdge = EXPORT_TARGET_EDGE,
+    min = MIN_EXPORT_CELL,
+    max = MAX_EXPORT_CELL,
+    maxEdge = MAX_EXPORT_EDGE,
+    maxPixels = MAX_EXPORT_PIXELS,
+  } = {},
+) {
+  const stitches = Math.max(1, chart.stitches)
+  const rows = Math.max(1, chart.rows)
+  const aspect = Math.max(1e-6, chart.gauge.stitchesPer4 / chart.gauge.rowsPer4)
+
+  /*
+    The ceiling comes first and beats everything below it, the floor included: a canvas
+    the browser refuses exports nothing at all, and on the tablet this app is for it is
+    refused silently, as a blank image.
+  */
+  const ceiling = Math.max(
+    1,
+    Math.min(
+      max,
+      maxEdge / stitches,
+      maxEdge / (rows * aspect),
+      Math.sqrt(maxPixels / (stitches * rows * aspect)),
+    ),
+  )
+  // The width that puts the longer edge on the target.
+  const wanted = Math.min(targetEdge / stitches, targetEdge / (rows * aspect))
+  let cell = Math.min(ceiling, Math.max(min, wanted))
+
+  const step = uniformCellStep(chart.gauge)
+  if (step > 1 && step <= ceiling) {
+    const up = Math.ceil(cell / step) * step
+    const down = Math.floor(cell / step) * step
+    /*
+      Prefer growing to the snap — a slightly bigger file, and cells that are all exactly
+      one size. If the ceiling forbids growing, snap down instead, but not past the floor:
+      at the very largest charts the ceiling is already close to the floor, and there the
+      few pixels of cell size are worth more than uniform rows.
+    */
+    if (up <= ceiling) cell = up
+    else if (down >= min) cell = down
+  }
+
+  /*
+    Round DOWN to whole pixels, then check the finished image rather than the cell.
+    Rounding up is how a size chosen just inside the ceiling ends up just outside it, and
+    `chartPixelSize` rounds the height too, so the only honest check is the one done on
+    the numbers the canvas will actually be given.
+  */
+  let px = Math.max(1, Math.floor(cell))
+  while (px > 1) {
+    const size = chartPixelSize({ ...chart, stitches, rows }, px)
+    if (
+      Math.max(size.width, size.height) <= maxEdge &&
+      size.width * size.height <= maxPixels
+    ) {
+      break
+    }
+    px--
+  }
+  return px
+}

@@ -178,8 +178,26 @@ export function colourProfile(raster, lut, { samples = PROFILE_SAMPLES, coverage
   return { needed, used: sorted.length, flat: needed <= FLAT_ART_COLOURS }
 }
 
-/** Sample points per axis inside a cell when taking its most common colour. */
+/** Fewest sample points per axis inside a cell when taking its most common colour. */
 export const MODE_GRID = 4
+
+/**
+ * Most sample points per axis. Sixty-four samples a cell, still O(cells).
+ *
+ * Four per axis is sixteen samples, and a cell of a 1024px working copy charted at
+ * sixty stitches covers about seventeen source pixels each way — nearly three hundred
+ * pixels. Deciding what such a cell is "mostly" from sixteen of them is a straw poll:
+ * along a diagonal or a curve the count is close, so which colour wins turns on which
+ * sixteen pixels happened to be looked at, and the edge wobbles a cell in and out. That
+ * wobble is what makes a charted logo look soft — the individual cells are hard-edged,
+ * but the LINE they form is ragged.
+ *
+ * So the grid follows the cell: as many samples per axis as the cell is source pixels
+ * wide, up to this cap. Small cells keep taking every pixel they have; big ones take
+ * enough to make the vote stable rather than every pixel, which would put the sampler
+ * back to O(source pixels) and undo the point of the summed-area table beside it.
+ */
+export const MODE_MAX_GRID = 8
 
 /**
  * A sampler that answers "what colour is this cell MOSTLY", for flat artwork.
@@ -190,32 +208,60 @@ export const MODE_GRID = 4
  * centre pixel instead avoids the halo but believes whatever that one pixel happens to
  * be — an antialiased edge, or a speck of JPEG noise.
  *
- * So: a small grid of samples, each quantized onto the palette, and the winner takes the
+ * So: a grid of samples, each quantized onto the palette, and the winner takes the
  * cell. A cell that is nine tenths navy comes out navy no matter what the other tenth is
- * doing. Sixteen samples a cell keeps this O(cells) like the summed-area table it sits
- * beside, rather than O(source pixels).
+ * doing. The grid is sized to the cell (see `MODE_MAX_GRID`) so the count is decided by
+ * enough of the cell to be stable, while staying O(cells) like the summed-area table it
+ * sits beside rather than O(source pixels).
+ *
+ * A TIE is decided by whichever colour has a sample closest to the middle of the cell.
+ * That sounds like a detail and is not: on any straight edge that runs near a cell
+ * boundary the vote is routinely tied, and taking the first colour the scan happened to
+ * see hands every one of those cells to its top-left corner. The whole edge then sits up
+ * to half a cell up and to the left of where the picture puts it, so a shape comes out
+ * shifted on one side and thin on the other. The middle of the cell is the one tie-break
+ * that has no direction in it.
  *
  * Returns a closure so the tally is allocated once rather than per cell.
  */
-export function createModeSampler(raster, lut, adjust, grid = MODE_GRID) {
+export function createModeSampler(raster, lut, adjust, grid = 0) {
   const { width, height, data } = raster
   const counts = new Uint16Array(PALETTE_SIZE)
-  const touched = new Int32Array(grid * grid)
+  // How close to the middle of the cell that colour's nearest sample fell, 1 = dead
+  // centre. Only meaningful for an index `counts` is currently holding.
+  const central = new Float64Array(PALETTE_SIZE)
+  const touched = new Int32Array(MODE_MAX_GRID * MODE_MAX_GRID)
   const adjusting = Boolean(
     adjust && (adjust.brightness || adjust.contrast || adjust.saturation),
   )
+  // A caller may pin the grid — the tests do, to hold one variable still.
+  const fixed = grid > 0 ? Math.min(MODE_MAX_GRID, Math.max(1, Math.round(grid))) : 0
 
   return (u0, v0, u1, v1) => {
+    /*
+      As many samples per axis as the cell has source pixels, capped. `ceil` rather than
+      `round` so a cell narrower than a pixel still gets one sample per axis, and so a
+      cell of three-and-a-bit pixels does not sample only three of them.
+    */
+    const span = (n) => Math.min(MODE_MAX_GRID, Math.max(MODE_GRID, Math.ceil(n)))
+    const gx = fixed || span((u1 - u0) * width)
+    const gy = fixed || span((v1 - v0) * height)
+
     let distinct = 0
     let opaque = 0
     let best = 0
     let bestCount = 0
+    let bestCentral = -1
 
-    for (let j = 0; j < grid; j++) {
-      const v = v0 + ((j + 0.5) / grid) * (v1 - v0)
+    for (let j = 0; j < gy; j++) {
+      const ty = (j + 0.5) / gy
+      const v = v0 + ty * (v1 - v0)
       const y = Math.min(height - 1, Math.max(0, Math.floor(v * height)))
-      for (let i = 0; i < grid; i++) {
-        const u = u0 + ((i + 0.5) / grid) * (u1 - u0)
+      // 1 in the middle of the cell, 0 at its edge, on each axis independently.
+      const nearY = 1 - Math.abs(ty - 0.5) * 2
+      for (let i = 0; i < gx; i++) {
+        const tx = (i + 0.5) / gx
+        const u = u0 + tx * (u1 - u0)
         const x = Math.min(width - 1, Math.max(0, Math.floor(u * width)))
         const p = (y * width + x) * 4
         if (data[p + 3] < 128) continue
@@ -232,18 +278,26 @@ export function createModeSampler(raster, lut, adjust, grid = MODE_GRID) {
         }
 
         const index = quantize(lut, r, g, b)
-        if (counts[index] === 0) touched[distinct++] = index
+        const near = (1 - Math.abs(tx - 0.5) * 2) * nearY
+        if (counts[index] === 0) {
+          touched[distinct++] = index
+          central[index] = near
+        } else if (near > central[index]) {
+          central[index] = near
+        }
+
         const n = ++counts[index]
-        if (n > bestCount) {
+        if (n > bestCount || (n === bestCount && central[index] > bestCentral)) {
           bestCount = n
           best = index
+          bestCentral = central[index]
         }
       }
     }
 
     // Clear only what was touched, so the tally stays O(samples) rather than O(palette).
     for (let k = 0; k < distinct; k++) counts[touched[k]] = 0
-    return { index: best, coverage: opaque / (grid * grid) }
+    return { index: best, coverage: opaque / (gx * gy) }
   }
 }
 
