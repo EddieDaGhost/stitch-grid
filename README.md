@@ -54,6 +54,12 @@ gauge, so what you see is the shape you'll end up holding.
 **Colours**
 - Matching onto a curated palette of 40 generic yarn colours, or just the neutrals or
   pastels
+- The colour count starts where *your picture* needs it, not at a fixed number — drop in
+  a three-colour logo and you get a three-colour chart, not a dozen shades invented along
+  its edges
+- Logos and flat artwork are spotted and handled properly: each square takes the colour
+  it is mostly made of, so edges stay hard instead of blurring into a colour that is in
+  neither side of them
 - A cap on how many colours to use, so you aren't asked to buy forty skeins
 - Keep a colour you care about, or ban one you don't have
 - Stray single stitches tidied away — each one costs a join, a cut and two woven ends

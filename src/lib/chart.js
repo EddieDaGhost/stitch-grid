@@ -12,7 +12,7 @@ import { PALETTE_SIZE, RESOLVED, composeMaps, excludeMap, histogram, quantize, r
   from './palette.js'
 import { paletteIndex } from '../config/palette.js'
 import { cellRectToSource, inBorder, inImage } from './layout.js'
-import { applyAdjust, boxAverage, nearestSample } from './raster.js'
+import { applyAdjust, boxAverage, createModeSampler, nearestSample } from './raster.js'
 
 /**
  * @typedef {{
@@ -58,7 +58,10 @@ export function buildChart({ sat, raster, layout, settings, lut }) {
 
   const borderIdx = Math.max(0, paletteIndex(settings.border.colorId))
   const padIdx = Math.max(0, paletteIndex(settings.padColorId))
-  const useArea = settings.sampling !== 'nearest'
+  // 'mode' picks the cell's most common colour and so decides the palette index itself;
+  // the other two hand back a colour for the same quantize step everything else uses.
+  const sampleMode = settings.sampling === 'mode' ? createModeSampler(raster, lut, settings.adjust) : null
+  const useArea = settings.sampling === 'area'
 
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < stitches; x++) {
@@ -76,11 +79,23 @@ export function buildChart({ sat, raster, layout, settings, lut }) {
       }
 
       const { u0, v0, u1, v1 } = cellRectToSource(layout, x, y)
+
+      if (sampleMode) {
+        const voted = sampleMode(u0, v0, u1, v1)
+        // A mostly-transparent cell is background, not black.
+        if (voted.coverage < 0.5) {
+          cells[i] = padIdx
+          protectedCells[i] = 1
+          continue
+        }
+        cells[i] = voted.index
+        continue
+      }
+
       const sample = useArea
         ? boxAverage(sat, u0, v0, u1, v1)
         : nearestSample(raster, (u0 + u1) / 2, (v0 + v1) / 2)
 
-      // A mostly-transparent cell is background, not black.
       if (sample.coverage < 0.5) {
         cells[i] = padIdx
         protectedCells[i] = 1

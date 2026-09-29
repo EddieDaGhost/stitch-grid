@@ -6,7 +6,7 @@
  * the core idea is actually wired through the UI, not just correct in a pure function.
  */
 
-import { asUpload, photoPng } from './pngfixture.mjs'
+import { asUpload, logoPng, photoPng } from './pngfixture.mjs'
 
 // Big enough that the detail slider has real range, and colourful enough that the
 // colour-limit controls have something to do.
@@ -20,6 +20,9 @@ const upload = asUpload('garden-photo.png', photoPng(800, 800))
   passing.
 */
 const wideUpload = asUpload('wide-photo.png', photoPng(900, 600))
+
+/* Three flat colours, antialiased, with compression noise — a logo as they arrive. */
+const logoUpload = asUpload('team-logo.png', logoPng(900, 600))
 
 /** The summary bar reads "84 × 96" under the "Chart" heading. */
 async function readChart(page) {
@@ -72,6 +75,43 @@ export default async function run({ page, check, errors, URL }) {
     'and the finished blanket is wider than it is tall',
     wideSize && Number(wideSize[1]) > Number(wideSize[2]),
     wideSize ? `${wideSize[1]}" x ${wideSize[2]}"` : 'no size shown',
+  )
+
+  await page.reload({ waitUntil: 'networkidle' })
+
+  /*
+    --- a flat logo is charted in the colours it actually has
+
+    Three flat colours, antialiased and noisy the way a real logo file is. Averaging
+    across those edges invents a shade that is in none of them, and the colour cap used
+    to be a constant that never looked at the picture, so this came out in twelve
+    colours with hundreds of extra joins — every one a cut and two ends to weave in.
+  */
+  await page.setInputFiles('input[type=file]', logoUpload)
+  await page.waitForSelector('[aria-label="Chart summary"]', { timeout: 15000 })
+  await page.waitForTimeout(300)
+
+  const summaryText = await page.getByLabel('Chart summary').innerText()
+  const colours = Number(summaryText.match(/COLOURS\s+(\d+)/i)?.[1] ?? -1)
+  const joins = Number((summaryText.match(/CHANGES\s+([\d,]+)/i)?.[1] ?? '-1').replace(/,/g, ''))
+  check(
+    'a three-colour logo is charted in a handful of colours, not a dozen',
+    colours > 0 && colours <= 5,
+    `${colours} colours`,
+  )
+  check(
+    'and the colour cap started where the picture needed it',
+    Number(await page.getByLabel('Maximum colours', { exact: true }).inputValue()) <= 5,
+    await page.getByLabel('Maximum colours', { exact: true }).inputValue(),
+  )
+  check(
+    'it was recognised as flat artwork rather than a photograph',
+    await page.getByRole('group', { name: 'What is this picture?' }).getByText('Flat art').getAttribute('aria-pressed') === 'true',
+  )
+  check(
+    'so the joins stay in proportion to a three-colour design',
+    joins > 0 && joins < colours * 250,
+    `${joins} colour changes for ${colours} colours`,
   )
 
   await page.reload({ waitUntil: 'networkidle' })
@@ -314,6 +354,20 @@ export default async function run({ page, check, errors, URL }) {
       return false
     })
 
+  /*
+    Letters are painted on a deliberately delayed pass, so they are asserted by waiting
+    for the outcome rather than by sleeping a fixed time and hoping. A fixed wait passes
+    on a quiet machine and fails on a busy one, which is a flaky test rather than a
+    meaningful one — the claim is "they appear", not "they appear within 500ms".
+  */
+  const waitForLetters = async (want) => {
+    for (let i = 0; i < 30; i++) {
+      if ((await lettersPainted()) === want) return true
+      await page.waitForTimeout(100)
+    }
+    return (await lettersPainted()) === want
+  }
+
   const lettersToggle = page.getByLabel('Show colour letters')
   check('there is a way to turn colour letters on', await lettersToggle.isVisible())
   check.is('and it starts off', await lettersToggle.getAttribute('aria-pressed'), 'false')
@@ -328,7 +382,9 @@ export default async function run({ page, check, errors, URL }) {
     await page.waitForTimeout(80)
   }
   await lettersToggle.click()
-  await page.waitForTimeout(400)
+  // A real wait here, not a poll: this asserts that nothing appears, so the delayed
+  // pass must have had its chance to fire before the check means anything.
+  await page.waitForTimeout(600)
   check(
     'turning them on when the cells are tiny says to zoom in instead',
     /zoom in/i.test(await page.locator('.stage').innerText()),
@@ -340,8 +396,7 @@ export default async function run({ page, check, errors, URL }) {
     await page.getByLabel('Zoom in').click()
     await page.waitForTimeout(80)
   }
-  await page.waitForTimeout(500)
-  check('zoomed in far enough, the letters appear', await lettersPainted())
+  check('zoomed in far enough, the letters appear', await waitForLetters(true))
   check(
     'and the hint goes back to the normal one',
     /right-hand edge/i.test(await page.locator('.stage').innerText()),
@@ -357,8 +412,7 @@ export default async function run({ page, check, errors, URL }) {
   check('so undo does not step through them', !/letter/i.test(undoWithLetters), undoWithLetters)
 
   await lettersToggle.click()
-  await page.waitForTimeout(400)
-  check('turning them off clears them', !(await lettersPainted()))
+  check('turning them off clears them', await waitForLetters(false))
 
   // Making mode is where a chart is actually READ, so the letters belong there too.
   await page.getByLabel('Make mode').click()

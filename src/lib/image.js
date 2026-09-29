@@ -5,7 +5,8 @@
  * downstream works from the Raster and the summed-area table built from it.
  */
 
-import { buildSat, countDistinctColors } from './raster.js'
+import { buildSat, colourProfile } from './raster.js'
+import { lutFor } from './palette.js'
 
 export const ACCEPTED = 'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp'
 
@@ -21,7 +22,7 @@ const MAX_EDGE = 1024
 let nextId = 1
 
 /**
- * @returns {Promise<{id, name, width, height, aspect, raster, sat, flatArt}>}
+ * @returns {Promise<{id, name, width, height, aspect, raster, sat, profile, flatArt}>}
  */
 export async function loadSource(file) {
   // `imageOrientation: 'from-image'` is not optional. Without it every photo taken in
@@ -67,6 +68,15 @@ export async function loadSource(file) {
   bitmap.close?.()
 
   const raster = { width, height, data: imageData.data }
+  /*
+    How many yarn colours the picture actually needs, measured against the full palette.
+
+    This decides two things at once: whether to treat the picture as flat artwork, and
+    how many colours to start the chart at. Both were guesses before — flat art from a
+    distinct-colour count that antialiasing defeated, and the colour cap from a constant
+    that never looked at the picture, so a three-colour logo was charted in twelve.
+  */
+  const profile = colourProfile(raster, lutFor('all', []))
   return {
     id: `src-${nextId++}`,
     name: file.name ?? 'image',
@@ -75,10 +85,10 @@ export async function loadSource(file) {
     aspect: sourceWidth / sourceHeight,
     raster,
     sat: buildSat(raster),
-    // Few distinct colours means a logo or cartoon, where averaging across hard edges
-    // invents halo colours. The UI offers to switch sampling rather than doing it
-    // silently — it's a guess, and a wrong guess should be one click to undo.
-    flatArt: countDistinctColors(raster) <= 64,
+    profile,
+    // A guess, and a wrong guess should be one click to undo — so the UI offers to
+    // switch rather than locking it in.
+    flatArt: profile.flat,
   }
 }
 

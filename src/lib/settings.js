@@ -38,7 +38,13 @@ export const DEFAULT_SETTINGS = {
   locked: [],
   excluded: [],
   swaps: {},
-  /** 'area' for photographs, 'nearest' for flat art with hard edges. */
+  /**
+   * How a cell decides its colour.
+   *   'area'    average the pixels under it — right for a photograph
+   *   'mode'    the most common colour under it — right for flat art and logos
+   *   'nearest' the single centre pixel — what 'mode' replaced, kept so a stored
+   *             setting still means something
+   */
   sampling: 'area',
   despeckle: 1,
   adjust: { brightness: 0, contrast: 0, saturation: 0 },
@@ -96,7 +102,7 @@ export function normalizeSettings(raw) {
     locked: cleanIds(s.locked),
     excluded: cleanIds(s.excluded),
     swaps,
-    sampling: s.sampling === 'nearest' ? 'nearest' : 'area',
+    sampling: s.sampling === 'nearest' || s.sampling === 'mode' ? s.sampling : 'area',
     despeckle: Math.round(clamp(s.despeckle, 0, 2, 1)),
     adjust: {
       brightness: clamp(s.adjust?.brightness, -1, 1, 0),

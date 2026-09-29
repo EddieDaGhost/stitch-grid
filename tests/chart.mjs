@@ -4,8 +4,20 @@
 
 import { buildChart, chartHash, compact, despeckle } from '../src/lib/chart.js'
 import { computeLayout } from '../src/lib/layout.js'
-import { lutFor } from '../src/lib/palette.js'
-import { checker, circle, halves, settings, solid, source, transparentLogo } from './fixtures.mjs'
+import { RESOLVED, lutFor, quantize } from '../src/lib/palette.js'
+import {
+  checker,
+  circle,
+  halves,
+  flatLogo,
+  photo,
+  settings,
+  solid,
+  source,
+  transparentLogo,
+} from './fixtures.mjs'
+import { FLAT_ART_COLOURS, colourProfile } from '../src/lib/raster.js'
+import { colourChanges } from '../src/lib/pattern.js'
 
 const SC = { stitchesPer4: 16, rowsPer4: 18, unit: 'in' }
 
@@ -157,5 +169,109 @@ export default async function run({ check }) {
   check(
     'every cell index is inside the palette',
     Array.from(full.cells).every((v) => v < full.palette.length),
+  )
+
+  /*
+    --- how many colours a picture actually needs
+
+    Not how many are in the file. A logo of three flat colours is still three flat
+    colours after antialiasing has softened every edge and a JPEG has scattered noise
+    across it — the extra values are real, but they are a fraction of a percent of the
+    pixels. The old measure counted distinct colours and answered "lots" for exactly
+    those files, which is how a three-colour logo came to be charted in twelve.
+  */
+  const fullLut = lutFor('all', [])
+  const profileOf = (raster) => colourProfile(raster, fullLut)
+
+  const crispLogo = profileOf(flatLogo(400, 300))
+  check.is('a three-colour logo needs three colours', crispLogo.needed, 3)
+  check('and reads as flat artwork', crispLogo.flat)
+
+  const softLogo = profileOf(flatLogo(400, 300, { ss: 8 }))
+  check.is('antialiasing the edges does not change what it needs', softLogo.needed, 3)
+  check('it is still flat artwork', softLogo.flat)
+  check(
+    'even though antialiasing really did add colours to the file',
+    softLogo.used > crispLogo.used,
+    `${crispLogo.used} -> ${softLogo.used} present`,
+  )
+
+  const jpegLogo = profileOf(flatLogo(400, 300, { ss: 8, noise: 6 }))
+  check.is('nor does compression noise', jpegLogo.needed, 3)
+  check('a logo saved as a JPEG is still flat artwork', jpegLogo.flat)
+
+  const photoProfile = profileOf(photo(400, 300))
+  check('a photograph needs many more colours', photoProfile.needed > FLAT_ART_COLOURS, String(photoProfile.needed))
+  check('and does not read as flat artwork', !photoProfile.flat)
+  /*
+    The point of the whole measure: the noisy logo and the photograph hold a similar
+    number of distinct colours, so counting them cannot tell these two apart. What
+    separates them is how few of those colours carry the picture.
+  */
+  check(
+    'a noisy logo and a photograph are told apart by need, not by how many colours they hold',
+    jpegLogo.needed * 2 < photoProfile.needed,
+    `logo needs ${jpegLogo.needed} (holds ${jpegLogo.used}), photo needs ${photoProfile.needed} (holds ${photoProfile.used})`,
+  )
+
+  const blank = profileOf(solid(64, 64, [200, 40, 40]))
+  check.is('a single flat colour needs one', blank.needed, 1)
+
+  // --- flat art keeps its own colours, and invents none
+  const softLogoRaster = flatLogo(400, 300, { ss: 8 })
+  const modeChart = make(softLogoRaster, { sampling: 'mode', detailPx: 6, despeckle: 0 })
+  const areaChart = make(softLogoRaster, { sampling: 'area', detailPx: 6, despeckle: 0 })
+  check(
+    'flat art sampling gives a logo far fewer colours than averaging does',
+    modeChart.palette.length < areaChart.palette.length,
+    `mode ${modeChart.palette.length}, area ${areaChart.palette.length}`,
+  )
+  check(
+    'and far fewer colour changes, which is what a join costs you',
+    colourChanges(modeChart, {}) < colourChanges(areaChart, {}),
+    `mode ${colourChanges(modeChart, {})}, area ${colourChanges(areaChart, {})}`,
+  )
+
+  /*
+    The invariant that matters. Averaging across an edge between navy and orange produces
+    a muddy value that is in neither, so the chart grows a halo of colours that appear
+    nowhere in the picture. Taking the colour a cell is MOSTLY made of cannot do that:
+    every cell comes back as a colour some pixel of the source already quantized to.
+  */
+  const sourceColours = new Set()
+  {
+    const d = softLogoRaster.data
+    for (let p = 0; p < d.length; p += 4) {
+      sourceColours.add(quantize(fullLut, d[p], d[p + 1], d[p + 2]))
+    }
+  }
+  const idsIn = (chart) => new Set(chart.palette.map((c) => c.id))
+  const paletteIdsOf = (indices) =>
+    new Set([...indices].map((i) => RESOLVED[i].id))
+  const allowed = paletteIdsOf(sourceColours)
+  const invented = [...idsIn(modeChart)].filter((id) => !allowed.has(id))
+  check.is('flat art sampling never invents a colour the picture does not contain', invented.length, 0, invented.join(','))
+
+  const areaInvented = [...idsIn(areaChart)].filter((id) => !allowed.has(id))
+  check(
+    'whereas averaging does, which is the halo along every edge',
+    areaInvented.length > 0,
+    areaInvented.join(',') || 'none',
+  )
+
+  // --- a two-colour picture stays two colours
+  const twoTone = make(halves(200, 200, [10, 20, 40], [240, 240, 240]), {
+    sampling: 'mode',
+    detailPx: 7,
+    despeckle: 0,
+  })
+  check.is('flat art sampling on a two-colour picture gives two colours', twoTone.palette.length, 2)
+
+  // --- transparency still reads as background, not as a colour
+  const cutout = make(transparentLogo(120, 120, [200, 40, 40]), { sampling: 'mode', despeckle: 0 })
+  check(
+    'a mostly-transparent cell is still background under flat art sampling',
+    cutout.palette.length <= 2,
+    `${cutout.palette.length} colours`,
   )
 }

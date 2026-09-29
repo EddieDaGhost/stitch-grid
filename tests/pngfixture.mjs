@@ -100,6 +100,48 @@ export function readPngSize(bytes) {
 }
 
 /** Playwright's setInputFiles payload. */
+/**
+ * A logo file as one actually arrives: a few flat colours, antialiased edges, and a
+ * dusting of compression noise. The noise is the point — a crisp logo is easy to
+ * recognise as flat artwork, and a logo that has been through a JPEG is what defeated
+ * the old detection.
+ */
+export function logoPng(width, height) {
+  const NAVY = [11, 22, 42]
+  const ORANGE = [200, 56, 3]
+  const WHITE = [245, 245, 245]
+  const SS = 4
+  let seed = 20260920
+  const jitter = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return (seed / 0x7fffffff - 0.5) * 12
+  }
+  const shape = (x, y) => {
+    const u = (x / width - 0.5) * 2.2
+    const v = (y / height - 0.5) * 2.2
+    const r = Math.hypot(u, v * 0.78)
+    if (Math.abs(Math.atan2(v, u)) < 0.38) return WHITE
+    if (r < 0.92 && r > 0.34) return r > 0.82 || r < 0.44 ? NAVY : ORANGE
+    return WHITE
+  }
+  return makePng(width, height, (x, y) => {
+    let r = 0
+    let g = 0
+    let b = 0
+    for (let sy = 0; sy < SS; sy++) {
+      for (let sx = 0; sx < SS; sx++) {
+        const [cr, cg, cb] = shape(x + (sx + 0.5) / SS, y + (sy + 0.5) / SS)
+        r += cr
+        g += cg
+        b += cb
+      }
+    }
+    const n = SS * SS
+    const clamp = (v) => Math.max(0, Math.min(255, Math.round(v)))
+    return [clamp(r / n + jitter()), clamp(g / n + jitter()), clamp(b / n + jitter())]
+  })
+}
+
 export function asUpload(name, buffer) {
   return { name, mimeType: 'image/png', buffer }
 }

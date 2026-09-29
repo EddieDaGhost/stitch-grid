@@ -49,6 +49,60 @@ export const transparentLogo = (w, h, rgb) =>
     return inShape ? [...rgb, 255] : [0, 0, 0, 0]
   })
 
+/**
+ * A logo: a few flat colours in hard-edged shapes, optionally with the antialiasing and
+ * compression noise every real logo file carries. `ss` supersamples the edges; `noise`
+ * jitters every channel the way a JPEG does.
+ *
+ * The noisy variant matters more than the clean one. A crisp logo is easy to recognise;
+ * the bug worth guarding is the one where a logo saved as a JPEG stops being recognised
+ * as flat artwork and gets averaged like a photograph.
+ */
+export function flatLogo(w, h, { ss = 1, noise = 0 } = {}) {
+  const NAVY = [11, 22, 42]
+  const ORANGE = [200, 56, 3]
+  const WHITE = [245, 245, 245]
+  const shape = (x, y) => {
+    const u = (x / w - 0.5) * 2.2
+    const v = (y / h - 0.5) * 2.2
+    const r = Math.hypot(u, v * 0.78)
+    if (Math.abs(Math.atan2(v, u)) < 0.38) return WHITE
+    if (r < 0.92 && r > 0.34) return r > 0.82 || r < 0.44 ? NAVY : ORANGE
+    return WHITE
+  }
+  // A fixed sequence, so a fixture is the same picture on every run.
+  let seed = 20260920
+  const jitter = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return (seed / 0x7fffffff - 0.5) * 2 * noise
+  }
+  return raster(w, h, (x, y) => {
+    let r = 0
+    let g = 0
+    let b = 0
+    for (let sy = 0; sy < ss; sy++) {
+      for (let sx = 0; sx < ss; sx++) {
+        const [cr, cg, cb] = shape(x + (sx + 0.5) / ss, y + (sy + 0.5) / ss)
+        r += cr
+        g += cg
+        b += cb
+      }
+    }
+    const n = ss * ss
+    return [r / n + jitter(), g / n + jitter(), b / n + jitter()]
+  })
+}
+
+/** A photograph-ish picture: continuous tone everywhere, no flat regions to speak of. */
+export const photo = (w, h) =>
+  raster(w, h, (x, y) => {
+    const u = x / w
+    const v = y / h
+    const r = Math.hypot(u - 0.45, (v - 0.42) * 1.15)
+    if (r < 0.26) return [226 * (0.75 + 0.25 * Math.cos(r * 6)), 186, 158]
+    return [230 - v * 180, 120 + u * 110, 60 + v * 170]
+  })
+
 /** A raster plus its summed-area table, which is what buildChart actually wants. */
 export function source(r) {
   return { raster: r, sat: buildSat(r), aspect: r.width / r.height, width: r.width }
