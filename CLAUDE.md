@@ -81,7 +81,15 @@ ask rather than "improving" it.
    from the legend's ranking so the screen, the key and the printed sheet can never call
    the same colour different things.
 
-11. **Your place is keyed by the chart, not by a slot.** `loadProgress` is keyed on
+11. **Measure what the picture needs; never assume it.** The colour cap starts at
+   `colourProfile().needed` — how few palette colours cover 95% of the picture — rather
+   than at a constant. A logo of three flat colours was charted in twelve because the
+   cap never looked at the picture, which invented nine shades that were in none of it
+   and turned every clean edge into a speckled one. It is capped at the old default in
+   the other direction, so a photograph starts exactly where it always did: this may
+   ask for fewer colours than before, never more.
+
+12. **Your place is keyed by the chart, not by a slot.** `loadProgress` is keyed on
    `chartHash`, so re-opening the same picture with the same settings lands on the row
    you left, and changing the design gives you a fresh row 1 rather than a position that
    silently means something else. That is what buys persistence with no project file, no
@@ -110,7 +118,7 @@ src/
 │   ├── palette.js   The 32³ lookup cube, neighbour table, colour capping
 │   ├── gauge.js     THE CORE: rowsForAspect, finished size, yardage
 │   ├── layout.js    Crop, settings + picture shape -> where every cell comes from
-│   ├── raster.js    Summed-area table — why the slider is free
+│   ├── raster.js    Summed-area table, the three samplers, and the colour profile
 │   ├── chart.js     The pipeline, and the Chart type
 │   ├── pattern.js   Rows, corner-to-corner, legend, yarn, written pattern
 │   ├── draw.js      Context-agnostic drawing (canvas OR a test stub)
@@ -128,6 +136,7 @@ src/
 
 - Changing the yarn colours → `src/config/palette.js`
 - Changing how a photo becomes a grid → `src/lib/chart.js`
+- Changing how a cell picks its colour, or how flat art is spotted → `src/lib/raster.js`
 - Changing which part of the photo is used at all → `src/lib/layout.js` (the crop)
 - Changing the crochet maths → `src/lib/gauge.js`
 - Changing what gets printed → `src/lib/chartPdf.js`
@@ -141,6 +150,15 @@ src/
 **Colours in the interface are never hardcoded.** Everything reads a CSS variable
 (`var(--ink)`, `var(--surface)`, `var(--accent)`). The exception, stated in the file
 itself, is the 40 yarn hexes in `config/palette.js`.
+
+**A cell picks its colour one of three ways, and the picture decides which.** `area`
+averages the pixels under the cell, which is right for a photograph and wrong for a
+logo — averaging across an edge between navy and orange yields a muddy value that is in
+neither, so every edge grows a halo of invented colours. `mode` takes the colour the
+cell is MOSTLY made of, from a fixed 4×4 grid of samples quantized onto the palette;
+that keeps edges hard and cannot invent anything, and it stays O(cells) like the
+summed-area table beside it. `nearest` reads the single centre pixel — what `mode`
+replaced, kept only so a stored setting still means something.
 
 **The order of the pipeline is load-bearing.** Border and pad cells take their palette
 index *before* quantization and are skipped by the remap and by despeckle, which is why a
@@ -219,6 +237,11 @@ The suites worth knowing about:
   at every single tick, and stitch ranges tile each row with no gap or overlap. An
   off-by-one at a row boundary is not a cosmetic bug here — it is somebody crocheting
   the wrong thing and not finding out for a fortnight.
+- **`chart.mjs`** pins the invariant that separates the two samplers: flat art sampling
+  can only ever return a colour some pixel of the source already quantized to, while
+  averaging demonstrably invents one along every edge. The fixtures are deliberately
+  antialiased and noisy, because a crisp logo is the easy case and the one that already
+  worked.
 - **`walkthrough.mjs`** charts a NON-square photo before anything else, and that is not
   incidental. Every other browser fixture is square, so a bug that loses the picture's
   aspect leaves the whole suite green while charting every photograph as a square. Do
@@ -255,6 +278,13 @@ The suites worth knowing about:
   centred on a whole coordinate. `drawGrid` derives the offset from `lineWidth` rather
   than adding a flat `+0.5`; that constant was correct only while every line was exactly
   one device pixel wide.
+- **Counting distinct colours cannot tell flat art from a photograph.** Every real logo
+  file carries antialiasing along its edges and noise from whatever saved it, so a
+  three-colour logo holds hundreds of distinct values — measured here, a noisy logo and
+  a photograph both came back with essentially the same count. What separates them is
+  how FEW colours carry the picture: the logo needs 3, the photograph 13. That is what
+  `colourProfile` measures, and why it quantizes onto the palette first — the question
+  is about yarn, not about pixels.
 - **The summed-area table must be `Float64Array`.** A 1024² image sums past 6×10¹⁰, which
   overflows a uint32 and silently corrupts the bottom-right quadrant.
 - **Crochet row 1 is the BOTTOM row**, and odd rows read the cells array reversed. That

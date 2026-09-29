@@ -89,7 +89,18 @@ export default function App() {
             locked: [],
             excluded: [],
             swaps: {},
-            sampling: loaded.flatArt ? 'nearest' : 'area',
+            sampling: loaded.flatArt ? 'mode' : 'area',
+            /*
+              Start at the number of colours the picture actually needs, never above the
+              default. A logo of three flat colours was being charted in twelve, which
+              invented nine shades nobody asked for and turned every clean edge into a
+              speckled one — hundreds of extra joins, each a cut and two woven ends.
+
+              Capped at the default rather than taken outright, so a photograph starts
+              exactly where it always did. This can only ever ask for FEWER colours than
+              before, which is the safe direction for a number that means "skeins to buy".
+            */
+            maxColors: Math.min(DEFAULT_SETTINGS.maxColors, loaded.profile.needed),
           }),
         ),
       )

@@ -476,21 +476,30 @@ export function AdjustPanel({ settings, update, commit }) {
 }
 
 export function CleanupPanel({ settings, update, flatArt }) {
+  /*
+    'nearest' is the older flat-art sampler. It still reads as "Flat art" here so an
+    old saved setting isn't shown as neither option, and picking flat art moves it on
+    to 'mode', which is the same idea done properly.
+  */
+  const isFlat = settings.sampling !== 'area'
   return (
     <Panel title="Tidying up">
       <Segmented
         label="What is this picture?"
-        value={settings.sampling}
+        value={isFlat ? 'flat' : 'area'}
         options={[
           { value: 'area', label: 'A photo' },
-          { value: 'nearest', label: 'Flat art' },
+          { value: 'flat', label: 'Flat art' },
         ]}
-        onChange={(v) => update((s) => ({ ...s, sampling: v }), 'picture type')}
+        onChange={(v) =>
+          update((s) => ({ ...s, sampling: v === 'flat' ? 'mode' : 'area' }), 'picture type')
+        }
       />
-      {flatArt && settings.sampling === 'area' ? (
+      {flatArt && !isFlat ? (
         <p className="text-xs leading-relaxed" style={{ color: 'var(--attention)' }}>
-          This looks like flat artwork. Switching to "Flat art" keeps the edges hard
-          instead of blending a third colour along them.
+          This looks like flat artwork. "Flat art" gives each square the colour it is
+          mostly made of, instead of averaging across an edge and inventing a third
+          colour that is in neither side of it.
         </p>
       ) : null}
 

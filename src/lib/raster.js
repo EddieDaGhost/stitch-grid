@@ -12,6 +12,7 @@
  */
 
 import { linearToSrgb, srgbToLinear } from './color.js'
+import { PALETTE_SIZE, quantize } from './palette.js'
 
 /** @typedef {{width:number, height:number, data:Uint8ClampedArray}} Raster */
 
@@ -123,16 +124,127 @@ export function nearestSample(raster, u, v) {
  * Rough count of distinct colours, capped so it stays cheap. Used to notice that an
  * upload is flat art and suggest the sampling mode that suits it.
  */
-export function countDistinctColors(raster, cap = 64) {
-  const seen = new Set()
+/**
+ * At or below this many colours, a picture is flat artwork rather than a photograph.
+ * Measured: logos land on two to five, photographs on eleven to twenty.
+ */
+export const FLAT_ART_COLOURS = 8
+
+/** How many samples to take when profiling. Enough to be stable, few enough to be free. */
+const PROFILE_SAMPLES = 4096
+
+/**
+ * How many yarn colours a picture actually needs.
+ *
+ * The question is not "how many distinct colours are in this file" — that counts the
+ * antialiasing along every edge and the noise left by whatever saved it, so a logo of
+ * three flat colours answers in the hundreds. It is "how few colours carry almost all
+ * of the picture", which is what somebody buying yarn means by the question.
+ *
+ * Measured by quantizing a sample of pixels onto the palette and asking how many of
+ * them it takes to cover `coverage` of the picture. A three-colour logo answers 3
+ * whether it is a crisp PNG, an antialiased one, or a JPEG with artefacts all over the
+ * edges — the noise is real, but it is a fraction of a percent of the pixels, so it
+ * falls outside the coverage rather than dominating the count.
+ *
+ * The old measure counted distinct 5-bit colours and called anything under 64 flat. A
+ * noisy logo and a photograph both came back 65: the same answer for two pictures that
+ * want opposite treatment.
+ */
+export function colourProfile(raster, lut, { samples = PROFILE_SAMPLES, coverage = 0.95 } = {}) {
+  const counts = new Uint32Array(PALETTE_SIZE)
   const { data } = raster
-  const step = Math.max(4, Math.floor(data.length / 4 / 4096) * 4)
+  const step = Math.max(4, Math.floor(data.length / 4 / samples) * 4)
+  let total = 0
+
   for (let p = 0; p < data.length; p += step) {
     if (data[p + 3] < 128) continue
-    seen.add((data[p] >> 3) * 1024 + (data[p + 1] >> 3) * 32 + (data[p + 2] >> 3))
-    if (seen.size > cap) return cap + 1
+    counts[quantize(lut, data[p], data[p + 1], data[p + 2])]++
+    total++
   }
-  return seen.size
+  if (!total) return { needed: 1, used: 0, flat: true }
+
+  const sorted = Array.from(counts).filter((c) => c > 0).sort((a, b) => b - a)
+  let covered = 0
+  let needed = sorted.length
+  for (let i = 0; i < sorted.length; i++) {
+    covered += sorted[i]
+    if (covered / total >= coverage) {
+      needed = i + 1
+      break
+    }
+  }
+
+  return { needed, used: sorted.length, flat: needed <= FLAT_ART_COLOURS }
+}
+
+/** Sample points per axis inside a cell when taking its most common colour. */
+export const MODE_GRID = 4
+
+/**
+ * A sampler that answers "what colour is this cell MOSTLY", for flat artwork.
+ *
+ * Averaging is right for a photograph and wrong for a logo: a cell straddling the edge
+ * between navy and orange averages to a muddy brown that appears nowhere in the design,
+ * and every edge in the picture grows a halo of invented colours. Taking the single
+ * centre pixel instead avoids the halo but believes whatever that one pixel happens to
+ * be — an antialiased edge, or a speck of JPEG noise.
+ *
+ * So: a small grid of samples, each quantized onto the palette, and the winner takes the
+ * cell. A cell that is nine tenths navy comes out navy no matter what the other tenth is
+ * doing. Sixteen samples a cell keeps this O(cells) like the summed-area table it sits
+ * beside, rather than O(source pixels).
+ *
+ * Returns a closure so the tally is allocated once rather than per cell.
+ */
+export function createModeSampler(raster, lut, adjust, grid = MODE_GRID) {
+  const { width, height, data } = raster
+  const counts = new Uint16Array(PALETTE_SIZE)
+  const touched = new Int32Array(grid * grid)
+  const adjusting = Boolean(
+    adjust && (adjust.brightness || adjust.contrast || adjust.saturation),
+  )
+
+  return (u0, v0, u1, v1) => {
+    let distinct = 0
+    let opaque = 0
+    let best = 0
+    let bestCount = 0
+
+    for (let j = 0; j < grid; j++) {
+      const v = v0 + ((j + 0.5) / grid) * (v1 - v0)
+      const y = Math.min(height - 1, Math.max(0, Math.floor(v * height)))
+      for (let i = 0; i < grid; i++) {
+        const u = u0 + ((i + 0.5) / grid) * (u1 - u0)
+        const x = Math.min(width - 1, Math.max(0, Math.floor(u * width)))
+        const p = (y * width + x) * 4
+        if (data[p + 3] < 128) continue
+        opaque++
+
+        let r = data[p]
+        let g = data[p + 1]
+        let b = data[p + 2]
+        if (adjusting) {
+          const out = applyAdjust([r, g, b], adjust)
+          r = out[0]
+          g = out[1]
+          b = out[2]
+        }
+
+        const index = quantize(lut, r, g, b)
+        if (counts[index] === 0) touched[distinct++] = index
+        const n = ++counts[index]
+        if (n > bestCount) {
+          bestCount = n
+          best = index
+        }
+      }
+    }
+
+    // Clear only what was touched, so the tally stays O(samples) rather than O(palette).
+    for (let k = 0; k < distinct; k++) counts[touched[k]] = 0
+    return { index: best, coverage: opaque / (grid * grid) }
+  }
 }
 
 /** Brightness / contrast / saturation, applied per CELL rather than per pixel. */
