@@ -208,6 +208,11 @@ npm run check -- gauge     # one suite
 TEST_URL=https://... npm run check
 ```
 
+Exports with no caller inside `src/` are worth a second look: most are internal helpers
+exported so a test can reach them, but twice now one has turned out to be a finished,
+tested capability wired to nothing — `showLetters` and then `redo`. A unit test cannot
+notice that; the function works perfectly and there is simply no way to reach it.
+
 The pure suites need nothing but Node — `playwright-core` is imported lazily so a bare
 checkout can run them. Browser suites drive real Chromium found via `CHROME_PATH` or
 `PLAYWRIGHT_BROWSERS_PATH`; no browser is downloaded at install.
@@ -285,6 +290,13 @@ The suites worth knowing about:
   how FEW colours carry the picture: the logo needs 3, the photograph 13. That is what
   `colourProfile` measures, and why it quantizes onto the palette first — the question
   is about yarn, not about pixels.
+- **A stitch's HEIGHT is most of its yarn cost, not its width.** `yardsFor` is a multiple
+  of `stitchSpanIn` — across the stitch, then up and back down its post. It used to be a
+  multiple of the width alone, which meant double crochet and corner-to-corner got the
+  same answer: identical widths, very different heights. The sanity check is that yarn
+  per square foot must FALL as the stitch gets taller — single crochet is the most
+  yarn-hungry stitch there is per unit of fabric. A model that gets that backwards is
+  telling people to buy more of the yarn they need less of.
 - **The summed-area table must be `Float64Array`.** A 1024² image sums past 6×10¹⁰, which
   overflows a uint32 and silently corrupts the bottom-right quadrant.
 - **Crochet row 1 is the BOTTOM row**, and odd rows read the cells array reversed. That

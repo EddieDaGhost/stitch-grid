@@ -7,6 +7,7 @@ import {
   canRedo,
   canUndo,
   commit,
+  describeRedo,
   describeUndo,
   emptyHistory,
   redo,
@@ -137,4 +138,19 @@ export default async function run({ check }) {
   let stable = emptyHistory(same)
   stable = commit(stable, same, 'detail', 1000)
   check.is('committing an identical value adds no step', stable.past.length, 0)
+
+  // --- redo names itself the same way undo does
+  let labelled = emptyHistory({ n: 0 })
+  check.is('with nothing to redo the button just says Redo', describeRedo(labelled), 'Redo')
+  labelled = commit(labelled, { n: 1 }, 'detail', 1000)
+  labelled = commit(labelled, { n: 2 }, 'gauge', 5000)
+  labelled = undo(labelled)
+  check.is('after undoing, redo names the edit it would put back', describeRedo(labelled), 'Redo gauge')
+  labelled = undo(labelled)
+  check.is('and stepping back again names the next one along', describeRedo(labelled), 'Redo detail')
+  labelled = redo(labelled)
+  check.is('redoing moves the label on', describeRedo(labelled), 'Redo gauge')
+  labelled = redo(labelled)
+  check.is('and the far end says Redo again', describeRedo(labelled), 'Redo')
+  check('with nothing left to redo', !canRedo(labelled))
 }

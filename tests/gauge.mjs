@@ -13,6 +13,7 @@ import {
   rowsForAspect,
   stitchWidthIn,
   stitchesForRows,
+  stitchSpanIn,
   yardsFor,
 } from '../src/lib/gauge.js'
 
@@ -91,4 +92,48 @@ export default async function run({ check }) {
   check.near('yardage is linear in cells', yardsFor(2000, SC), yardsFor(1000, SC) * 2, 1e-9)
   check('a looser gauge uses more yarn per stitch', yardsFor(1000, DC) > yardsFor(1000, SC))
   check.is('no cells means no yarn', yardsFor(0, SC), 0)
+
+  /*
+    Height is half the answer, and used to be absent from it entirely.
+
+    A stitch is not a dot: a double crochet post is two and a half times the height of
+    a single crochet one and swallows yarn to match. The old estimate was a multiple of
+    the stitch's WIDTH alone, so it could not tell double crochet from corner-to-corner
+    — same width, very different height — and returned the same number for both.
+  */
+  const C2C = { stitchesPer4: 12, rowsPer4: 12, unit: 'in' }
+  check.is(
+    'double crochet and corner-to-corner are the same width',
+    stitchWidthIn(DC),
+    stitchWidthIn(C2C),
+  )
+  check('but double crochet is much taller', rowHeightIn(DC) > rowHeightIn(C2C) * 1.5)
+  check(
+    'so it cannot want the same amount of yarn',
+    yardsFor(1000, DC) > yardsFor(1000, C2C) * 1.2,
+    `dc ${yardsFor(1000, DC).toFixed(1)} vs c2c ${yardsFor(1000, C2C).toFixed(1)}`,
+  )
+  check('a taller stitch always spans further', stitchSpanIn(DC) > stitchSpanIn(SC))
+
+  /*
+    The sanity check that says the shape is right rather than merely different: single
+    crochet is the most yarn-hungry stitch there is per unit of fabric, and each taller
+    stitch covers the same area for less. A model that got this backwards would be
+    telling people to buy more yarn for the stitch that uses less.
+  */
+  const yardsPerSquareFoot = (gauge) => {
+    const areaSqFt = (1000 * stitchWidthIn(gauge) * rowHeightIn(gauge)) / 144
+    return yardsFor(1000, gauge) / areaSqFt
+  }
+  const HDC = { stitchesPer4: 14, rowsPer4: 12, unit: 'in' }
+  check(
+    'single crochet eats the most yarn per square foot of fabric',
+    yardsPerSquareFoot(SC) > yardsPerSquareFoot(HDC),
+    `sc ${yardsPerSquareFoot(SC).toFixed(0)} vs hdc ${yardsPerSquareFoot(HDC).toFixed(0)}`,
+  )
+  check(
+    'and double crochet the least of the three',
+    yardsPerSquareFoot(HDC) > yardsPerSquareFoot(DC),
+    `hdc ${yardsPerSquareFoot(HDC).toFixed(0)} vs dc ${yardsPerSquareFoot(DC).toFixed(0)}`,
+  )
 }
