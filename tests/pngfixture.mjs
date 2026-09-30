@@ -145,3 +145,22 @@ export function logoPng(width, height) {
 export function asUpload(name, buffer) {
   return { name, mimeType: 'image/png', buffer }
 }
+
+/**
+ * A big picture whose detail is FINER than a whole-frame working copy can hold.
+ *
+ * Vertical stripes, ten pixels to a pair. In a 4200px photo scaled down to the 1024px
+ * whole-frame copy that is a period of two and a half pixels, which averaging flattens to
+ * a single mid-tone. Rebuild the copy around a quarter of the photo and the same stripes
+ * are eight pixels apart — two chart stitches — and plainly chartable.
+ *
+ * Uniform on purpose: every part of the picture holds the same stripes, so a chart of a
+ * crop and a chart of the whole photo differ in exactly one thing, which is how much
+ * detail the working copy kept. Anything less regular and the comparison would be
+ * measuring the content instead.
+ */
+export function finePatternPng(width, height) {
+  const NAVY = [18, 30, 62]
+  const CREAM = [242, 232, 208]
+  return makePng(width, height, (x) => (x % 10 < 5 ? NAVY : CREAM))
+}

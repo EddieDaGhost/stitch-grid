@@ -38,7 +38,9 @@ gauge, so what you see is the shape you'll end up holding.
 **Designing**
 - Drag and drop a JPG, PNG or WebP
 - **Framing**: drag a frame over the photo to pick the part you want. A blanket is a
-  long job — it should be spent on the dog, not on the lawn around it
+  long job — it should be spent on the dog, not on the lawn around it. The working copy is
+  rebuilt around whatever you framed, so cropping in here is as sharp as cropping in
+  another app first and uploading that
 - A detail slider, showing the stitch count live rather than a pixel size
 - Zoom, and a counting grid with a heavier line every ten stitches
 - A letter in every cell, on demand — so the chart can be read without telling Sage from

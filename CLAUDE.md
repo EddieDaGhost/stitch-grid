@@ -95,6 +95,17 @@ ask rather than "improving" it.
    silently means something else. That is what buys persistence with no project file, no
    account and no stored image.
 
+13. **The working copy follows the crop; the stitch count does not.** The resolution
+   budget belongs to the part of the photo being charted, so `refocusTarget` rebuilds the
+   working copy around the framing once it settles — a quarter-width crop of a big photo
+   was charted from a quarter of a 1024px copy, which made cropping in this app strictly
+   worse than cropping in another one first, the exact thing the framing panel exists to
+   avoid. The stitch count deliberately does NOT follow: it counts against
+   `source.workingWidth`, what a full-frame copy would be, because Detail is pixels per
+   stitch and a sharper copy is more detail in the same blanket, never a bigger one.
+   Reading it off `source.raster.width` instead would resize a blanket somebody is forty
+   hours into, silently.
+
 ---
 
 ## Ids are permanent
@@ -128,6 +139,8 @@ src/
 │   ├── history.js   Undo
 │   ├── progress.js  Where you are while making: stepping, stats, the chart overlay
 │   └── image/png/download/storage/wakelock.js  ← the ONLY modules that touch the DOM
+│                     image.js holds the FILE, not the decoded picture, and rebuilds
+│                     the working copy when the framing settles
 ├── components/      All UI
 └── index.css        Every interface colour, as CSS variables
 ```
@@ -138,6 +151,8 @@ src/
 - Changing how a photo becomes a grid → `src/lib/chart.js`
 - Changing how a cell picks its colour, or how flat art is spotted → `src/lib/raster.js`
 - Changing which part of the photo is used at all → `src/lib/layout.js` (the crop)
+- Changing how much of the photo's detail reaches the chart → `refocusTarget` in
+  `src/lib/layout.js`, and `refocusSource` in `src/lib/image.js`
 - Changing the crochet maths → `src/lib/gauge.js`
 - Changing what gets printed → `src/lib/chartPdf.js`
 - Changing how you keep your place while crocheting → `src/lib/progress.js`
@@ -159,6 +174,16 @@ cell is MOSTLY made of, from a fixed 4×4 grid of samples quantized onto the pal
 that keeps edges hard and cannot invent anything, and it stays O(cells) like the
 summed-area table beside it. `nearest` reads the single centre pixel — what `mode`
 replaced, kept only so a stored setting still means something.
+
+**Two coordinate systems meet at `relativeCrop`, and only there.** `settings.crop` is a
+rectangle on the WHOLE picture — it is what the framing panel draws, what undo restores and
+what gets saved. `layout.crop` and `layout.sample` are rectangles on the WORKING COPY,
+because that is what the sampler indexes, and the working copy covers only `source.view`
+once the framing has settled. On a full-frame view the two are the same, which is why
+everything downstream of `computeLayout` needed no change; off it they are not, and mixing
+them charts the wrong part of the photo without anything throwing. The framing panel draws
+`source.preview` for the same reason — draw `source.raster` there and after a crop the rest
+of the photo is simply gone, with nothing left to widen back into.
 
 **The order of the pipeline is load-bearing.** Border and pad cells take their palette
 index *before* quantization and are skipped by the remap and by despeckle, which is why a
@@ -251,6 +276,13 @@ The suites worth knowing about:
   incidental. Every other browser fixture is square, so a bug that loses the picture's
   aspect leaves the whole suite green while charting every photograph as a square. Do
   not make that first fixture square to simplify an assertion.
+- **`refocus.mjs`** measures the same grid on the same picture twice, once from a
+  whole-frame working copy and once from one rebuilt around the crop, and the fixture is
+  uniform so nothing but the resolution differs. It reads the chart's colour count and its
+  join count, which is what makes the old behaviour legible as a failure rather than as
+  softness: one pixel per stitch invented a third colour that is in no part of the photo
+  and 70% more joins than the picture contains — a dithered chart, arrived at by accident.
+  It also pins the invariant that the rebuild must not change the stitch count.
 - **`tablet.mjs`** checks the stage's own box, not just the canvas inside it. A canvas
   keeps its size and quietly overflows a collapsed parent, so asserting on the canvas
   alone will happily pass while the chart is a 32-pixel sliver.
@@ -297,6 +329,14 @@ The suites worth knowing about:
   per square foot must FALL as the stitch gets taller — single crochet is the most
   yarn-hungry stitch there is per unit of fabric. A model that gets that backwards is
   telling people to buy more of the yarn they need less of.
+- **A crop is not a free remap any more.** It used to be pure arithmetic on normalised
+  coordinates; now settling on one re-decodes the original file, so it is debounced, gated
+  behind `refocusTarget` (a margin so an ordinary nudge does not retrigger, and a
+  resolution test so a small photo is never rebuilt for detail it does not have), and
+  guarded by a sequence number because a seventeen megapixel decode is long enough for a
+  different picture to be opened underneath it. `source.rev` is in the chart cache key for
+  the same reason: a refocus is the one thing that changes the cells while every setting
+  stays put, so without it the sharper copy never reaches the screen.
 - **The summed-area table must be `Float64Array`.** A 1024² image sums past 6×10¹⁰, which
   overflows a uint32 and silently corrupts the bottom-right quadrant.
 - **Crochet row 1 is the BOTTOM row**, and odd rows read the cells array reversed. That

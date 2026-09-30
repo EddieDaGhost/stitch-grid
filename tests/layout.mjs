@@ -15,6 +15,8 @@ import {
   inImage,
   isFullFrame,
   normalizeCrop,
+  refocusTarget,
+  relativeCrop,
   squareCrop,
   stitchesForDetail,
 } from '../src/lib/layout.js'
@@ -338,4 +340,119 @@ export default async function run({ check }) {
     squared.rows,
     rowsForAspect(squared.image.w, 1, SC),
   )
+
+  // --- the working copy's own coordinates
+  //
+  // The crop is a rectangle on the whole photo; the pixels are a rectangle on the whole
+  // photo too, but not the same one. Getting this mapping wrong does not throw — it
+  // charts the wrong part of the picture, or the right part at the wrong shape.
+  const view = { x: 0.2, y: 0.1, w: 0.4, h: 0.5 }
+  check.is(
+    'against the whole frame, a crop is itself',
+    JSON.stringify(relativeCrop({ x: 0.25, y: 0.5, w: 0.5, h: 0.25 }, FULL_FRAME)),
+    JSON.stringify({ x: 0.25, y: 0.5, w: 0.5, h: 0.25 }),
+  )
+  const inside = relativeCrop({ x: 0.3, y: 0.2, w: 0.2, h: 0.25 }, view)
+  check.near('a crop inside the view is offset by it', inside.x, 0.25, 1e-9)
+  check.near('on both axes', inside.y, 0.2, 1e-9)
+  check.near('and scaled by it', inside.w, 0.5, 1e-9)
+  check.near('on both axes', inside.h, 0.5, 1e-9)
+  const sameRect = relativeCrop(view, view)
+  check('a crop the view was built for fills it', isFullFrame(sameRect))
+  const overhang = relativeCrop({ x: 0, y: 0, w: 1, h: 1 }, view)
+  check('a crop wider than the view clamps to the view', isFullFrame(overhang))
+  const partial = relativeCrop({ x: 0.1, y: 0.1, w: 0.4, h: 0.4 }, view)
+  check.near('a crop hanging off the left is intersected, not shifted', partial.x, 0, 1e-9)
+  check.near('and keeps only the overlap', partial.w, 0.75, 1e-9)
+
+  /*
+    The invariant that matters: a rebuilt working copy must not change the chart's SHAPE.
+
+    Every number the user sees — the stitch count, the row count, the finished size —
+    must come out identical whether the pixels underneath happen to cover the whole photo
+    or just the crop. If it does not, tightening the framing silently resizes a blanket
+    somebody is about to spend forty hours on, and nothing anywhere throws.
+  */
+  const cropRect2 = { x: 0.2, y: 0.15, w: 0.4, h: 0.5 }
+  const wide = settings({ gauge: SC, detailPx: 12, crop: cropRect2 })
+  const beforeRefocus = computeLayout(wide, 1.5, 1024, FULL_FRAME)
+  const afterRefocus = computeLayout(wide, 1.5, 1024, cropRect2)
+  check.is('refocusing does not change the stitch count', afterRefocus.stitches, beforeRefocus.stitches)
+  check.is('nor the row count', afterRefocus.rows, beforeRefocus.rows)
+  check('a refocused chart still reports itself as cropped', afterRefocus.cropped)
+  check.is(
+    'and the cells still come from the same place on the photo',
+    JSON.stringify(afterRefocus.sample),
+    JSON.stringify({ u0: 0, v0: 0, u1: 1, v1: 1 }),
+  )
+
+  // Under the refocused view the sample is the whole raster, and the raster is the crop —
+  // so mapping a cell through both must land in the same patch of the ORIGINAL photo.
+  const toSource = (layout, v, x, y) => {
+    const r = cellRectToSource(layout, x, y)
+    return { u0: v.x + r.u0 * v.w, v0: v.y + r.v0 * v.h, u1: v.x + r.u1 * v.w, v1: v.y + r.v1 * v.h }
+  }
+  let worstDrift = 0
+  for (let y = afterRefocus.image.y; y < afterRefocus.image.y + afterRefocus.image.h; y += 7) {
+    for (let x = afterRefocus.image.x; x < afterRefocus.image.x + afterRefocus.image.w; x += 7) {
+      const a = toSource(beforeRefocus, FULL_FRAME, x, y)
+      const b = toSource(afterRefocus, cropRect2, x, y)
+      for (const k of ['u0', 'v0', 'u1', 'v1']) worstDrift = Math.max(worstDrift, Math.abs(a[k] - b[k]))
+    }
+  }
+  check('every cell reads the same patch of the original photo either way', worstDrift < 1e-9, worstDrift)
+
+  // The same must hold for "fill the grid", which narrows the sample a second time.
+  const covered = settings({ gauge: SC, detailPx: 12, crop: cropRect2, target: { stitches: 90, rows: 70 }, fit: 'cover' })
+  const coverFull = computeLayout(covered, 1.5, 1024, FULL_FRAME)
+  const coverView = computeLayout(covered, 1.5, 1024, cropRect2)
+  check.is('cover keeps its stitch count across a refocus', coverView.stitches, coverFull.stitches)
+  const cf = toSource(coverFull, FULL_FRAME, coverFull.image.x, coverFull.image.y)
+  const cv = toSource(coverView, cropRect2, coverView.image.x, coverView.image.y)
+  check.near('and trims to the same rectangle of the photo', cv.u0, cf.u0, 1e-9)
+  check.near('on both axes', cv.v0, cf.v0, 1e-9)
+
+  // --- when a rebuild is worth doing
+  const big = { width: 4000, height: 3000, maxEdge: 1024 }
+  const quarter = { x: 0.3, y: 0.3, w: 0.25, h: 0.25 }
+  const firstTarget = refocusTarget(quarter, FULL_FRAME, big)
+  check('a quarter-width crop of a big photo is worth rebuilding for', firstTarget !== null)
+  check('the target covers the crop', firstTarget.x <= quarter.x && firstTarget.w >= quarter.w)
+  check('with a margin, so a nudge does not redo it', firstTarget.w > quarter.w)
+  check(
+    'and the margin is slack, not a new crop',
+    firstTarget.w < quarter.w * 1.5,
+    firstTarget.w,
+  )
+  check.is('asking again for what was just built is a no-op', refocusTarget(quarter, firstTarget, big), null)
+  check.is(
+    'and so is a small nudge inside the margin',
+    refocusTarget({ ...quarter, x: quarter.x + 0.005 }, firstTarget, big),
+    null,
+  )
+  check(
+    'but widening past the pixels on hand is a correction, not an optimisation',
+    refocusTarget(FULL_FRAME, firstTarget, big) !== null,
+  )
+  check.is('a full-frame crop on a full-frame view needs nothing', refocusTarget(FULL_FRAME, FULL_FRAME, big), null)
+
+  // A photo smaller than the budget has no detail left to recover, so a rebuild is pure
+  // cost. Without this the app would re-decode a phone screenshot on every drag.
+  const small = { width: 600, height: 400, maxEdge: 1024 }
+  check.is('a small photo is never rebuilt for sharpness', refocusTarget(quarter, FULL_FRAME, small), null)
+  check(
+    'though a crop it does not hold is still honoured',
+    refocusTarget({ x: 0, y: 0, w: 1, h: 1 }, { x: 0.2, y: 0.2, w: 0.3, h: 0.3 }, small) !== null,
+  )
+
+  // Repeatedly refocusing must converge, or the app decodes the photo forever.
+  let settle = FULL_FRAME
+  let steps = 0
+  for (; steps < 10; steps += 1) {
+    const next = refocusTarget(quarter, settle, big)
+    if (!next) break
+    settle = next
+  }
+  check('refocusing settles', steps < 10, `${steps} rebuilds`)
+  check('and it settles in one step', steps <= 1, `${steps} rebuilds`)
 }

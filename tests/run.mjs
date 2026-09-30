@@ -26,6 +26,7 @@ const SUITES = [
   { name: 'pdf', file: './pdf.mjs', browser: false },
   { name: 'history', file: './history.mjs', browser: false },
   { name: 'walkthrough', file: './walkthrough.mjs', browser: true },
+  { name: 'refocus', file: './refocus.mjs', browser: true },
   { name: 'export', file: './export.mjs', browser: true, clipboard: true },
   { name: 'tablet', file: './tablet.mjs', browser: true, ownContexts: true },
 ]
