@@ -77,9 +77,6 @@ export default function App() {
   const [history, setHistory] = useState(() => emptyHistory(loadSettings()))
   const [view, setView] = useState(DEFAULT_VIEW)
   const [busy, setBusy] = useState(false)
-  // Set while the working copy is being rebuilt around a new crop — see the refocus
-  // effect. Purely a label; the chart on screen is correct throughout.
-  const [sharpening, setSharpening] = useState(false)
   const [error, setError] = useState('')
   const [panelsOpen, setPanelsOpen] = useState(true)
 
@@ -198,6 +195,16 @@ export default function App() {
     hand: the frame you dragged is on screen immediately at the resolution available, and
     sharpens a moment later. Doing it the other way round would stall the drag itself.
 
+    Deliberately silent. A spinner was written for this and then taken back out: measured
+    here, letting go of the frame puts the crop on screen in 3ms and the sharper version
+    about 800ms later, on a 17 megapixel photo charted at 220 stitches — the extreme case,
+    not a normal one. What changes across that gap is sharpness, not content, so it reads as
+    something settling rather than something breaking. And the indicator itself could not be
+    made to behave: gated at 200ms it never appeared at all, ungated it sat there for 600ms,
+    because where the async boundary falls and when React commits do not line up with how
+    long the wait actually feels. A label that shows on one machine and not another for the
+    same wait is worse than no label. Revisit it only with measurements from a phone.
+
     Not gated on design mode, and that is the considered choice rather than an oversight.
     A refocus changes the cells, so it changes `chartHash`, so it would move somebody's
     place in making mode — but nothing in making mode can change the crop, so the only
@@ -218,7 +225,6 @@ export default function App() {
 
     const seq = ++refocusSeq.current
     const timer = setTimeout(() => {
-      setSharpening(true)
       refocusSource(source, target)
         .then((next) => {
           // Two guards, because decoding is slow enough for a lot to happen underneath it:
@@ -231,9 +237,6 @@ export default function App() {
         .catch(() => {
           // A failed re-decode is not an error the user needs to see: the chart they are
           // looking at is still correct, just built from a softer copy than it could be.
-        })
-        .finally(() => {
-          if (refocusSeq.current === seq) setSharpening(false)
         })
     }, REFOCUS_DELAY_MS)
     return () => clearTimeout(timer)
@@ -499,18 +502,6 @@ export default function App() {
           {busy ? (
             <p className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-2)' }}>
               <Loader2 className="h-4 w-4 animate-spin" /> Reading the picture…
-            </p>
-          ) : null}
-          {/* The chart below is already correct and already drawn; this only says why it
-              is about to get sharper. Silence would be worse than a label — a chart that
-              visibly changes a beat after you stopped touching it reads as a glitch. */}
-          {sharpening && !busy ? (
-            <p
-              className="flex items-center gap-2 text-sm"
-              aria-live="polite"
-              style={{ color: 'var(--ink-2)' }}
-            >
-              <Loader2 className="h-4 w-4 animate-spin" /> Sharpening the crop…
             </p>
           ) : null}
           <Stage

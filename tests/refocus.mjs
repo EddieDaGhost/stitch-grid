@@ -48,36 +48,28 @@ async function readSummary(page) {
 }
 
 /**
- * Wait until the working copy has stopped being rebuilt, then read the chart.
+ * Wait for the summary the rebuild should produce, and return whatever it actually is.
  *
  * Polled rather than slept through, because rebuilding means re-decoding a seventeen
  * megapixel PNG and how long that takes is a property of the machine. A fixed wait is
  * either slow on a fast machine or flaky on a loaded one, and flaky is much worse — it
  * teaches everyone to re-run a red suite instead of reading it.
  *
- * Both conditions are needed. Waiting for the chart to change is not enough: widening the
- * frame back out passes through a real intermediate state, where the crop is already the
- * whole picture but the pixels still only cover the old one, so the first change seen is
- * not the answer. Waiting for the notice alone is not enough either, because it has not
- * appeared yet during the debounce.
+ * Waiting for a specific answer rather than for the chart to stop changing, because
+ * "stopped changing" is not decidable here: widening the frame back out passes through a
+ * real intermediate state — the crop is already the whole picture while the pixels still
+ * cover only the old one — and that state can easily outlast any stability window. On a
+ * timeout this returns the wrong answer instead of throwing, so the assertion that follows
+ * reports what the chart actually said.
  */
-async function waitForQuiet(page, timeoutMs = 25000) {
+async function waitForSummary(page, wanted, timeoutMs = 25000) {
   const deadline = Date.now() + timeoutMs
-  // Past the debounce, so the notice has had its chance to appear at all.
-  await page.waitForTimeout(600)
-  let previous = null
-  while (Date.now() < deadline) {
-    const rebuilding = await page
-      .getByText(/sharpening the crop/i)
-      .isVisible()
-      .catch(() => false)
-    const now = await readSummary(page)
-    const steady = previous && now.changes === previous.changes && now.colours === previous.colours
-    if (!rebuilding && steady) return now
-    previous = now
-    await page.waitForTimeout(200)
+  let last = await readSummary(page)
+  while (Date.now() < deadline && !wanted(last)) {
+    await page.waitForTimeout(150)
+    last = await readSummary(page)
   }
-  return previous ?? readSummary(page)
+  return last
 }
 
 async function setNumber(page, label, value) {
@@ -142,14 +134,6 @@ export default async function run({ page, check, errors, URL }) {
   await page.mouse.move(grab.x, grab.y)
   await page.mouse.down()
   await page.mouse.move(grab.x - frameBox.width * 0.5, grab.y - frameBox.height * 0.5, { steps: 8 })
-
-  // Armed before the drag ends, because the notice only lives for as long as the decode.
-  const sawNotice = page
-    .getByText(/sharpening the crop/i)
-    .waitFor({ state: 'visible', timeout: 15000 })
-    .then(() => true)
-    .catch(() => false)
-
   await page.mouse.up()
 
   /*
@@ -162,8 +146,6 @@ export default async function run({ page, check, errors, URL }) {
   await page.waitForTimeout(120)
   const duringCrop = await readChart(page)
   const duringSummary = await readSummary(page)
-
-  check('the app says it is sharpening the crop rather than changing it silently', await sawNotice)
 
   /*
     The un-refocused chart is the interesting number here, and it is worse in both of the
@@ -179,7 +161,9 @@ export default async function run({ page, check, errors, URL }) {
     `${duringSummary.colours} colours, ${duringSummary.changes} changes`,
   )
 
-  const settled = await waitForQuiet(page)
+  // Two colours is the answer a rebuilt copy gives, so it is also the signal that the
+  // rebuild has landed — and if it never does, the assertions below say what came back.
+  const settled = await waitForSummary(page, (v) => v.colours === 2)
   const afterCrop = await readChart(page)
   check.is('the stitch count is untouched by the rebuild', afterCrop.stitches, duringCrop.stitches)
   check.is('and is still the size that was asked for', afterCrop.stitches, 220)
@@ -208,7 +192,10 @@ export default async function run({ page, check, errors, URL }) {
     because after a crop it no longer contains the rest of the photo.
   */
   await page.getByLabel('Use the whole picture').click()
-  const reopened = await waitForQuiet(page)
+  const reopened = await waitForSummary(
+    page,
+    (v) => v.colours === whole.colours && v.changes === whole.changes,
+  )
   check.is(
     'widening back gives exactly the chart the whole picture gave before',
     `${reopened.colours}/${reopened.changes}`,
