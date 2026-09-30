@@ -87,13 +87,3 @@ export function saveProgress(chartId, progress) {
   }
 }
 
-export function clearProgress(chartId) {
-  if (!chartId) return
-  try {
-    const map = readProgressMap()
-    delete map[chartId]
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(map))
-  } catch {
-    // As above.
-  }
-}

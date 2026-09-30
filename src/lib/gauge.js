@@ -101,15 +101,39 @@ export function formatSize(size, unit = 'in') {
 }
 
 /**
+ * The distance a stitch makes the yarn travel: once across its width, and up and back
+ * down its post.
+ *
+ * A stitch is not a dot, and how TALL it is matters as much as how wide. A double
+ * crochet post is two and a half times the height of a single crochet one and swallows
+ * yarn accordingly, which is the whole reason a double crochet blanket of the same size
+ * is a different shopping list.
+ */
+export function stitchSpanIn(gauge) {
+  return stitchWidthIn(gauge) + 2 * rowHeightIn(gauge)
+}
+
+/**
  * Rough yarn needed for one colour, in yards.
  *
- * The multiplier is yarn length per stitch expressed in stitch widths. Real
- * consumption varies with tension, hook and stitch far more than any formula can
- * predict, which is why the UI says "rough estimate, buy 20% more" rather than
- * printing a confident number nobody should trust.
+ * The multiplier is yarn length per stitch expressed in stitch SPANS — see above. It
+ * used to be expressed in stitch widths alone, which meant the estimate could not tell
+ * a double crochet stitch from a corner-to-corner one: identical widths, wildly
+ * different heights, and the same answer for both. Height was simply absent from the
+ * arithmetic, so the taller the stitch, the further short the estimate fell.
+ *
+ * The scale is anchored where it has always been. This constant is chosen so single
+ * crochet — the default gauge, and the one the old number was pitched at — comes out
+ * exactly as before; what changes is that the other stitches now move away from it, in
+ * the right direction and roughly the right amount.
+ *
+ * It is still a model and not a measurement. Real consumption varies with tension, hook
+ * and how you carry colours more than any formula can predict, which is why the UI says
+ * "rough, buy 20% more" rather than printing a confident number nobody should trust —
+ * and why a wrong shape in the model is worth fixing even though the number stays rough.
  */
-export const YARN_PER_STITCH = 5.5
+export const YARN_PER_STITCH = 1.98
 
 export function yardsFor(cells, gauge) {
-  return (cells * stitchWidthIn(gauge) * YARN_PER_STITCH) / 36
+  return (cells * stitchSpanIn(gauge) * YARN_PER_STITCH) / 36
 }

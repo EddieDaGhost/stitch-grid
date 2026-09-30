@@ -90,3 +90,13 @@ export function reset(history, defaults, now = Date.now()) {
 export function describeUndo(history) {
   return canUndo(history) && history.presentLabel ? `Undo ${history.presentLabel}` : 'Undo'
 }
+
+/**
+ * And what redo should say. It names the edit it is about to put BACK, which lives on
+ * the entry being restored rather than on the present one — the mirror of undo, where
+ * the label travels with the state it produced.
+ */
+export function describeRedo(history) {
+  const next = history.future[0]
+  return canRedo(history) && next?.label ? `Redo ${next.label}` : 'Redo'
+}

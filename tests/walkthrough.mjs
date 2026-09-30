@@ -222,6 +222,45 @@ export default async function run({ page, check, errors, URL }) {
   const afterUndo = await page.locator('[aria-label="Colour key"] li').count()
   check.is('undo steps the colour limit back to what it was', afterUndo, raised)
 
+  /*
+    And redo puts it back. It was implemented and tested in history.js from the first
+    version and wired to nothing, which no unit test could notice — the function worked
+    perfectly, there was simply no way to reach it. Undo without redo makes undo
+    something to approach carefully rather than reach for.
+  */
+  const redoButton = page.locator('header button[aria-label^="Redo"]')
+  check('there is a redo button', await redoButton.isVisible())
+  check(
+    'and it names the edit it would put back',
+    (await redoButton.getAttribute('aria-label')) !== 'Redo',
+    await redoButton.getAttribute('aria-label'),
+  )
+  await redoButton.click()
+  await page.waitForTimeout(250)
+  check(
+    'redo puts the undone edit back',
+    (await page.locator('[aria-label="Colour key"] li').count()) < afterUndo,
+    `${afterUndo} -> ${await page.locator('[aria-label="Colour key"] li').count()}`,
+  )
+
+  // The shortcuts everyone's hands already know.
+  await page.keyboard.press('ControlOrMeta+z')
+  await page.waitForTimeout(250)
+  check.is(
+    'ctrl+z undoes it again',
+    await page.locator('[aria-label="Colour key"] li').count(),
+    afterUndo,
+  )
+  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await page.waitForTimeout(250)
+  check(
+    'and ctrl+shift+z redoes it',
+    (await page.locator('[aria-label="Colour key"] li').count()) < afterUndo,
+  )
+  // Back to where the rest of the suite expects to be.
+  await page.keyboard.press('ControlOrMeta+z')
+  await page.waitForTimeout(250)
+
   // --- reset
   await page.getByLabel('Reset all settings').click()
   await page.waitForTimeout(250)
@@ -482,6 +521,10 @@ export default async function run({ page, check, errors, URL }) {
   check(
     'and hides reset for the same reason',
     !(await page.getByLabel('Reset all settings').isVisible().catch(() => false)),
+  )
+  check(
+    'and redo, which is just as much an edit',
+    !(await page.locator('header button[aria-label^="Redo"]').isVisible().catch(() => false)),
   )
   // Counting is exactly what you are doing here, so the grid stays.
   check('but keeps the counting grid', await page.getByLabel('Show counting grid').isVisible())

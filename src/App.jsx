@@ -14,7 +14,16 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Grid3x3, Type, Undo2, RotateCcw, PanelLeftClose, PanelLeft, Loader2 } from 'lucide-react'
+import {
+  Grid3x3,
+  Type,
+  Undo2,
+  Redo2,
+  RotateCcw,
+  PanelLeftClose,
+  PanelLeft,
+  Loader2,
+} from 'lucide-react'
 import Dropzone from './components/Dropzone.jsx'
 import CropPanel from './components/CropPanel.jsx'
 import Make from './components/Make.jsx'
@@ -37,7 +46,17 @@ import { FULL_FRAME, computeLayout } from './lib/layout.js'
 import { lutFor } from './lib/palette.js'
 import { colourChanges, dimensions, legend, patternText } from './lib/pattern.js'
 import { DEFAULT_SETTINGS, DEFAULT_VIEW, normalizeSettings, settingsKey } from './lib/settings.js'
-import { canUndo, commit, describeUndo, emptyHistory, reset, undo } from './lib/history.js'
+import {
+  canRedo,
+  canUndo,
+  commit,
+  describeRedo,
+  describeUndo,
+  emptyHistory,
+  redo,
+  reset,
+  undo,
+} from './lib/history.js'
 import { loadSource } from './lib/image.js'
 import { chartToPngBlob } from './lib/png.js'
 import { buildChartPdf } from './lib/chartPdf.js'
@@ -70,6 +89,33 @@ export default function App() {
   useEffect(() => {
     saveSettings(settings)
   }, [settings])
+
+  /**
+   * The shortcuts everyone's hands already know.
+   *
+   * Not while making: rule 8 — nothing in that mode may alter a chart somebody is forty
+   * hours into, and a keyboard is no different from a mis-tap. Not while a field has
+   * focus either, where the browser's own undo is what you meant.
+   */
+  useEffect(() => {
+    if (makeMode) return undefined
+    const onKey = (event) => {
+      if (!event.metaKey && !event.ctrlKey) return
+      const tag = event.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable) return
+
+      const key = event.key.toLowerCase()
+      if (key === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        setHistory(undo)
+      } else if ((key === 'z' && event.shiftKey) || key === 'y') {
+        event.preventDefault()
+        setHistory(redo)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [makeMode])
 
   const openFile = useCallback(async (file) => {
     setBusy(true)
@@ -329,6 +375,21 @@ export default function App() {
                 onClick={() => setHistory(undo)}
               >
                 <Undo2 className="h-4 w-4" />
+              </button>
+              {/*
+                Redo has been implemented and tested in history.js since the first
+                version and was never wired to anything. Undo without it is half a
+                feature: one stray tap costs you an edit with no way back, which makes
+                undo something to approach carefully rather than to reach for.
+              */}
+              <button
+                type="button"
+                className="btn-ghost !min-h-11 !px-2.5"
+                aria-label={describeRedo(history)}
+                disabled={!canRedo(history)}
+                onClick={() => setHistory(redo)}
+              >
+                <Redo2 className="h-4 w-4" />
               </button>
               <button
                 type="button"

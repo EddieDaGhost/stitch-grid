@@ -49,7 +49,8 @@ gauge, so what you see is the shape you'll end up holding.
   circle in the photo into an oval, which is the exact thing this tool exists to stop
 - Brightness, contrast and saturation — yarn has a much narrower range than a photo,
   so these usually matter more than anything else
-- Undo and reset, where a slider drag counts as one step
+- Undo, redo and reset, where a slider drag counts as one step — and the keyboard
+  shortcuts your hands already know
 
 **Colours**
 - Matching onto a curated palette of 40 generic yarn colours, or just the neutrals or
@@ -89,7 +90,10 @@ gauge, so what you see is the shape you'll end up holding.
 **Being honest**
 - Finished size in inches or centimetres, at *your* gauge, with a note that it depends
   on your tension
-- Rough yarn estimates per colour, clearly labelled as rough
+- Rough yarn estimates per colour, clearly labelled as rough, and worked out from the
+  height of your stitch as well as its width — a double crochet post swallows far more
+  yarn than a single crochet one, which is why the same blanket is a different shopping
+  list depending on how you work it
 - The number of colour changes, next to the colour count — a 12-colour chart with 900
   joins is far more work than a 20-colour one with 200
 
