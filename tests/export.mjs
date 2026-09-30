@@ -9,6 +9,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { asUpload, photoPng, readPngSize } from './pngfixture.mjs'
+import { MIN_EXPORT_CELL, cellEdges, chartPixelSize, exportCellPx } from '../src/lib/draw.js'
+
+/** The gauge the app opens with, which is what this walkthrough charts at. */
+const SC = { stitchesPer4: 16, rowsPer4: 18, unit: 'in' }
 
 const upload = asUpload('garden-photo.png', photoPng(600, 400))
 
@@ -39,7 +43,27 @@ export default async function run({ page, check, errors, URL, tmp }) {
   check('and is named as a chart', png.suggested.endsWith('-chart.png'))
 
   const size = readPngSize(png.bytes)
-  check.is('the PNG is one cell block per stitch', size.width, stitches * 14)
+  /*
+    The exported file is sized from the chart, not at a fixed fourteen pixels a stitch —
+    that fixed size is what made a downloaded chart look softer than the preview did, and
+    it put rows of two different heights in every file at the default gauge. Asserted
+    against the same pure function the app calls, so this cannot drift from it.
+  */
+  const cell = exportCellPx({ stitches, rows, gauge: SC, cells: new Uint8Array(0), palette: [], meta: {} })
+  const expectedSize = chartPixelSize({ stitches, rows, gauge: SC }, cell)
+  check.is('the PNG is one cell block per stitch', size.width, stitches * cell)
+  check.is('and holds the height the chart asks for', size.height, expectedSize.height)
+  check(
+    'the export is no longer a fixed fourteen pixels a stitch',
+    cell > MIN_EXPORT_CELL,
+    `${cell}px a stitch for a ${stitches}x${rows} chart`,
+  )
+
+  // Every row exactly the same height, which is what stops a big chart looking soft.
+  const ys = cellEdges(rows, size.height)
+  const heights = new Set()
+  for (let i = 0; i < rows; i++) heights.add(ys[i + 1] - ys[i])
+  check.is('every row of the exported file is the same height', heights.size, 1, [...heights].join(','))
 
   /**
    * The important one: the exported image's shape must match the FINISHED BLANKET, not

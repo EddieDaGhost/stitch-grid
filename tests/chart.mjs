@@ -11,12 +11,14 @@ import {
   halves,
   flatLogo,
   photo,
+  raster,
   settings,
   solid,
   source,
   transparentLogo,
 } from './fixtures.mjs'
-import { FLAT_ART_COLOURS, colourProfile } from '../src/lib/raster.js'
+import { FLAT_ART_COLOURS, colourProfile, createModeSampler } from '../src/lib/raster.js'
+import { cellRectToSource } from '../src/lib/layout.js'
 import { colourChanges } from '../src/lib/pattern.js'
 
 const SC = { stitchesPer4: 16, rowsPer4: 18, unit: 'in' }
@@ -266,6 +268,150 @@ export default async function run({ check }) {
     despeckle: 0,
   })
   check.is('flat art sampling on a two-colour picture gives two colours', twoTone.palette.length, 2)
+
+  /*
+    --- how WELL flat art sampling answers its own question
+
+    "The colour this cell is mostly made of" has an exact answer: quantize every pixel
+    under the cell and count. The sampler does not read every pixel — that would make it
+    cost the size of the photo rather than the size of the chart — so the only question
+    is whether the samples it does take are enough to get that answer right.
+
+    Four per axis is sixteen samples of a cell that, on a 1024px working copy, holds
+    close to three hundred pixels. Along every diagonal and curve the true count is
+    close, so a straw poll of sixteen lands on the wrong side often enough to make the
+    EDGE ragged even though each cell is hard. That raggedness is what reads as a soft
+    chart. This measures it, against the exact answer, and pins that the sampler as it
+    ships beats the sixteen-sample version it replaced.
+  */
+  {
+    const fullLutHere = lutFor('all', [])
+    const art = flatLogo(480, 360)
+    const src = source(art)
+    const s = settings({ gauge: SC, sampling: 'mode', detailPx: 8, despeckle: 0 })
+    const layout = computeLayout(s, src.aspect, src.width)
+
+    // The exact answer, by counting every pixel under the cell.
+    const trueMajority = (u0, v0, u1, v1) => {
+      const { width, height, data } = art
+      const x0 = Math.round(u0 * width)
+      const x1 = Math.max(x0 + 1, Math.round(u1 * width))
+      const y0 = Math.round(v0 * height)
+      const y1 = Math.max(y0 + 1, Math.round(v1 * height))
+      const tally = new Map()
+      for (let y = y0; y < Math.min(height, y1); y++) {
+        for (let x = x0; x < Math.min(width, x1); x++) {
+          const p = (y * width + x) * 4
+          const index = quantize(fullLutHere, data[p], data[p + 1], data[p + 2])
+          tally.set(index, (tally.get(index) ?? 0) + 1)
+        }
+      }
+      let best = -1
+      let bestN = 0
+      let tied = false
+      for (const [index, n] of tally) {
+        if (n > bestN) {
+          bestN = n
+          best = index
+          tied = false
+        } else if (n === bestN) tied = true
+      }
+      // A genuinely tied cell has no right answer, so it is not scored either way.
+      return tied ? -1 : best
+    }
+
+    const shipped = createModeSampler(art, fullLutHere, null)
+    const sixteen = createModeSampler(art, fullLutHere, null, 4)
+    let scored = 0
+    let wrongShipped = 0
+    let wrongSixteen = 0
+    for (let y = 0; y < layout.rows; y++) {
+      for (let x = 0; x < layout.stitches; x++) {
+        const rect = cellRectToSource(layout, x, y)
+        const want = trueMajority(rect.u0, rect.v0, rect.u1, rect.v1)
+        if (want < 0) continue
+        scored++
+        if (shipped(rect.u0, rect.v0, rect.u1, rect.v1).index !== want) wrongShipped++
+        if (sixteen(rect.u0, rect.v0, rect.u1, rect.v1).index !== want) wrongSixteen++
+      }
+    }
+    check(
+      'flat art sampling agrees with the exact majority for almost every cell',
+      wrongShipped / scored < 0.02,
+      `${wrongShipped} of ${scored} cells wrong`,
+    )
+    check(
+      'and gets more of them right than a fixed sixteen-sample vote did',
+      wrongShipped < wrongSixteen,
+      `sampled by cell size ${wrongShipped} wrong, fixed 4x4 ${wrongSixteen} wrong`,
+    )
+  }
+
+  /*
+    --- a tie must not have a direction in it
+
+    Sixteen samples tie often, and the old tally kept whichever colour the scan reached
+    first, which is always the one nearest the top-left corner. Every tied cell along an
+    edge therefore went the same way, so a shape came out shifted towards that corner:
+    fattened on one side, shaved on the other, which is exactly how a charted logo stops
+    looking like the logo. A tie is now settled by which colour has a sample closest to
+    the middle of the cell — the one tie-break with no direction in it.
+
+    Built as an exact tie: thirty-two samples each, and the second colour holds the
+    middle of the cell while the first holds the top rows and the bottom one.
+  */
+  {
+    const A = [11, 22, 42]
+    const B = [200, 56, 3]
+    // Rows 0-2 and row 7 are A; rows 3-6, the middle of the cell, are B. 4 rows each.
+    const tie = raster(8, 8, (x, y) => (y >= 3 && y <= 6 ? B : A))
+    const fullLutHere = lutFor('all', [])
+    const sampler = createModeSampler(tie, fullLutHere, null)
+    const picked = sampler(0, 0, 1, 1).index
+    const wantB = quantize(fullLutHere, B[0], B[1], B[2])
+    const wantA = quantize(fullLutHere, A[0], A[1], A[2])
+    check(
+      'a tied cell goes to the colour at its middle, not the one at its top-left',
+      picked === wantB,
+      picked === wantA ? 'picked the top-left colour' : `wanted ${wantB}, picked ${picked}`,
+    )
+  }
+
+  /*
+    --- a mirrored picture charts as the mirrored chart
+
+    A floor rather than an identity: the sample points land on whole source pixels, and
+    a pixel grid does not mirror exactly, so a handful of cells along the edges can
+    legitimately differ. What this catches is a future change that decides cells by
+    something with a direction in it, which shows up here as a large disagreement
+    rather than a few cells.
+  */
+  {
+    const art = flatLogo(360, 360)
+    const mirrored = raster(360, 360, (x, y) => {
+      const p = (y * 360 + (359 - x)) * 4
+      return [art.data[p], art.data[p + 1], art.data[p + 2], art.data[p + 3]]
+    })
+    const opts = { sampling: 'mode', detailPx: 9, despeckle: 0, maxColors: 8 }
+    const straight = make(art, opts)
+    const flipped = make(mirrored, opts)
+    check.is('a mirrored picture charts to the same size', straight.stitches, flipped.stitches)
+
+    let same = 0
+    const n = straight.stitches * straight.rows
+    for (let y = 0; y < straight.rows; y++) {
+      for (let x = 0; x < straight.stitches; x++) {
+        const a = straight.palette[straight.cells[y * straight.stitches + x]]
+        const b = flipped.palette[flipped.cells[y * flipped.stitches + (flipped.stitches - 1 - x)]]
+        if (a?.id === b?.id) same++
+      }
+    }
+    check(
+      'and charts as the mirror image of that chart, bar the pixel grid',
+      same / n > 0.99,
+      `${n - same} of ${n} cells differ`,
+    )
+  }
 
   // --- transparency still reads as background, not as a colour
   const cutout = make(transparentLogo(120, 120, [200, 40, 40]), { sampling: 'mode', despeckle: 0 })

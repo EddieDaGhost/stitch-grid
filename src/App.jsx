@@ -257,7 +257,8 @@ export default function App() {
 
   const exportPng = useCallback(async () => {
     const blob = await chartToPngBlob(chart, {
-      cellPx: 14,
+      // Cell size is chosen from the chart rather than fixed, so the file has enough
+      // pixels to be zoomed into or printed. See `exportCellPx`.
       grid: view.showGrid,
       // What you were looking at is what you get, letters included.
       letters: view.showLetters ? letters : null,

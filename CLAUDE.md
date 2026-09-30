@@ -320,6 +320,18 @@ The suites worth knowing about:
 - **`scrollIntoView` scrolls every scrollable ancestor, the page included.** Keeping the
   current run visible with it silently scrolls the chart off the top of a stacked
   layout on every tick. Move the list's own `scrollTop` instead.
+- **An exported image is sized from the chart, never fixed.** A cell's height is its
+  width times the gauge aspect, so a flat 14px cell makes rows 12.44px tall and
+  `cellEdges` has to give out rows of 12 and 13 alternating — which looks blurry however
+  crisp each cell is. `exportCellPx` picks a width that makes the height land on a whole
+  number (a multiple of `rowsPer4 / gcd(stitchesPer4, rowsPer4)`), aims the long edge at
+  a size worth zooming into, and stops at the canvas limits below. Anything that goes
+  back to a constant cell size re-introduces both.
+- **Safari on an iPad refuses a big canvas by returning a BLANK one.** No exception, no
+  null — just an empty image. The ceiling is around sixteen million pixels, which the
+  old export passed on the largest charts. `MAX_EXPORT_PIXELS` and `MAX_EXPORT_EDGE` are
+  checked against the finished image size, not against the cell, because
+  `chartPixelSize` rounds too.
 - **Below `lg` the app stacks, and must NOT be a fixed height.** The panel column is
   taller than the screen, so `h-[100dvh]` hands the stage whatever is left — nothing.
   The stage carries its own `min-h` for the stacked case; `tests/tablet.mjs` guards it.
