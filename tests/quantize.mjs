@@ -3,6 +3,7 @@
  */
 
 import { PALETTE, subsetIndices } from '../src/config/palette.js'
+import { applyAdjust } from '../src/lib/raster.js'
 import {
   NEIGHBOURS,
   PALETTE_SIZE,
@@ -138,4 +139,71 @@ export default async function run({ check }) {
   // Ordering: a swap applied after a reduction must not be undone by it.
   const order = composeMaps(excludeMap([]), reduceMap(counts, 4, []), swapMap({ sage: 'moss' }))
   check.is('a swap survives a reduction applied before it', order[sage], moss)
+
+  /*
+    --- greyscale needs no palette of its own, and that is load-bearing
+
+    Greyscale in this app is saturation at the bottom of its range: the pixels arrive grey
+    and the quantizer picks from the whole shelf. That only produces a grey chart because
+    CIEDE2000 charges a warm neutral for its chroma, so Cream, Ecru, Oatmeal and Linen lose
+    to Fog and Silver even though they are pale and unsaturated to look at.
+
+    This is exactly the kind of thing that stays true until it doesn't. Add one low-chroma
+    putty or warm grey to the palette and greyscale charts would quietly start putting beige
+    in them, with nothing anywhere throwing. So the invariant is asserted over the whole
+    256-level ramp rather than on a couple of examples.
+  */
+  const greyLut = lutFor('all', [])
+  const reached = new Set()
+  for (let v = 0; v <= 255; v += 1) reached.add(PALETTE[quantize(greyLut, v, v, v)].id)
+
+  const chromaOf = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16))
+    return Math.max(r, g, b) - Math.min(r, g, b)
+  }
+  const warmest = [...reached].reduce((worst, id) => {
+    const here = chromaOf(PALETTE.find((p) => p.id === id).hex)
+    return here > worst.chroma ? { id, chroma: here } : worst
+  }, { id: 'none', chroma: 0 })
+
+  check(
+    'a grey ramp only ever reaches near-neutral yarns',
+    warmest.chroma <= 20,
+    `worst was ${warmest.id} at chroma ${warmest.chroma}`,
+  )
+  check(
+    'and never a warm neutral, however pale it looks',
+    !['cream', 'ecru', 'oatmeal', 'linen'].some((id) => reached.has(id)),
+    [...reached].join(' '),
+  )
+  check(
+    'with enough steps for a picture to survive losing its hues',
+    reached.size >= 5,
+    `${reached.size} greys: ${[...reached].join(' ')}`,
+  )
+
+  /*
+    And the desaturation itself must weight the channels by how bright they look. A flat
+    (r+g+b)/3 average is the classic shortcut and it makes pure green and pure blue the same
+    grey, which flattens exactly the contrast a greyscale chart has left to work with.
+  */
+  const flat = (rgb) => {
+    const [r, g, b] = applyAdjust(rgb, { saturation: -1 })
+    return r === g && g === b ? r : null
+  }
+  const greenGrey = flat([0, 255, 0])
+  const blueGrey = flat([0, 0, 255])
+  const redGrey = flat([255, 0, 0])
+  check('full desaturation leaves every channel equal', greenGrey !== null && blueGrey !== null)
+  check(
+    'and green reads far brighter than blue, as the eye sees it',
+    greenGrey - blueGrey > 150,
+    `green ${greenGrey} vs blue ${blueGrey}`,
+  )
+  check('with red between the two', redGrey > blueGrey && redGrey < greenGrey, `red ${redGrey}`)
+  check(
+    'a flat channel average would have made them identical, and does not',
+    greenGrey !== redGrey && redGrey !== blueGrey,
+  )
+  check.is('and no saturation change leaves a colour exactly alone', applyAdjust([10, 20, 30], { saturation: 0 }).join(), '10,20,30')
 }

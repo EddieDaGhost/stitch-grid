@@ -322,6 +322,15 @@ The suites worth knowing about:
   how FEW colours carry the picture: the logo needs 3, the photograph 13. That is what
   `colourProfile` measures, and why it quantizes onto the palette first — the question
   is about yarn, not about pixels.
+- **Greyscale is saturation, not a palette.** It is `adjust.saturation` at the bottom of
+  its range, and the toggle in the Picture panel is DERIVED from that rather than stored —
+  one source of truth, so the slider and the toggle cannot disagree and no saved settings
+  blob needs migrating. It needs no grey subset: measured, a pure grey ramp quantized
+  against the WHOLE palette lands on exactly the six true greys and never on Cream, Ecru,
+  Oatmeal or Linen, because CIEDE2000 charges a warm neutral for its chroma. That is a
+  property of the current palette, not a guarantee — **add a low-chroma putty or warm grey
+  and greyscale charts will quietly start putting beige in them.** `tests/quantize.mjs`
+  walks all 256 grey levels to catch exactly that.
 - **A number you type has to be allowed to be briefly wrong.** `NumberField` clamped on
   every keystroke, which reads as careful and is unusable: the gauge minimum is 4, so
   clearing the field snapped it to 4 instead of going blank, and then typing 1 and 2 to

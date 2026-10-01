@@ -271,6 +271,70 @@ export default async function run({ page, check, errors, URL }) {
   // innerText is the RENDERED text, and the label style uppercases it.
   check('colour changes are reported', /colour changes/i.test(await page.getByLabel('Chart summary').innerText()))
 
+  /*
+    --- greyscale
+
+    The app could always do this — saturation has reached -100 since the first version —
+    and nobody could find it. So what is tested is the reachable control, and what it must
+    be is one state rather than two: the toggle is derived from the slider, so the slider
+    has to follow the toggle AND the toggle has to follow the slider. A stored boolean
+    beside the slider would pass a test of the first and fail the second.
+  */
+  const colourGroup = page.getByRole('group', { name: 'Colour', exact: true })
+  const saturation = page.getByLabel('Saturation', { exact: true })
+  const greyButton = colourGroup.getByText('Greyscale')
+  const colourButton = colourGroup.getByText('Full colour')
+  const keyIds = async () =>
+    (await page.getByLabel('Colour key').innerText()).toLowerCase()
+
+  check.is('a picture starts in full colour', await colourButton.getAttribute('aria-pressed'), 'true')
+  const colourKey = await keyIds()
+
+  await greyButton.click()
+  await page.waitForTimeout(250)
+  check.is('the greyscale button takes', await greyButton.getAttribute('aria-pressed'), 'true')
+  check.is('and it IS the saturation slider, pushed to the bottom', await saturation.inputValue(), '-100')
+
+  const greyKey = await keyIds()
+  check('the key changes', greyKey !== colourKey)
+  check(
+    'and lists only greys the palette really has',
+    ['ink', 'charcoal', 'slate', 'silver', 'fog', 'snow'].some((g) => greyKey.includes(g)),
+    greyKey.replace(/\s+/g, ' ').slice(0, 120),
+  )
+  check(
+    'with no warm neutral smuggled in',
+    !/cream|ecru|oatmeal|linen/.test(greyKey),
+    greyKey.replace(/\s+/g, ' ').slice(0, 120),
+  )
+  check(
+    'and it says what that means for shopping',
+    /grey yarns to buy/i.test(await page.getByRole('region', { name: 'Picture' }).innerText()),
+  )
+
+  // Derived, not stored: moving the slider off the bottom has to release the toggle.
+  await saturation.fill('-40')
+  await page.waitForTimeout(200)
+  check.is('dragging saturation off the bottom releases the toggle', await greyButton.getAttribute('aria-pressed'), 'false')
+  check.is('and hands it back to full colour', await colourButton.getAttribute('aria-pressed'), 'true')
+
+  // Greyscale is an edit to the design, so undo has to name it and step out of it.
+  await greyButton.click()
+  await page.waitForTimeout(200)
+  check(
+    'turning it on is an edit undo knows by name',
+    /greyscale/i.test(await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label')),
+    await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label'),
+  )
+  await page.locator('header button[aria-label^="Undo"]').click()
+  await page.waitForTimeout(250)
+  check.is('and undo puts the colour back', await saturation.inputValue(), '-40')
+
+  await colourButton.click()
+  await page.waitForTimeout(250)
+  check.is('going back to full colour zeroes the saturation', await saturation.inputValue(), '0')
+  check.is('and restores the colour key', await keyIds(), colourKey)
+
   // --- undo names the thing it will undo
   const undoLabel = await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label')
   check('the undo button names the last edit', undoLabel !== 'Undo', undoLabel)

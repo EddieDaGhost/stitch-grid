@@ -484,11 +484,52 @@ export function PalettePanel({ settings, update, commit, chart }) {
 
 export function AdjustPanel({ settings, update, commit }) {
   const set = (key) => (v) => update((s) => ({ ...s, adjust: { ...s.adjust, [key]: v / 100 } }), key)
+
+  /*
+    Greyscale is not a setting of its own — it IS saturation at the bottom of its range,
+    which the app could already do and nobody could find.
+
+    So the toggle is DERIVED rather than stored. One source of truth: drag the slider to
+    -100 and the toggle lights up; press the toggle and the slider moves. A boolean sitting
+    beside the slider would be two names for one state, and sooner or later they disagree —
+    and it would have to be migrated into every saved settings blob for nothing.
+
+    It needs no palette restriction either, which is worth knowing before anyone adds one.
+    Measured: a pure grey ramp quantized against the WHOLE palette lands on exactly the six
+    true greys — Snow, Fog, Silver, Slate, Charcoal, Ink — and never on Cream, Ecru, Oatmeal
+    or Linen, because CIEDE2000 charges those for their chroma. Desaturated pixels are the
+    only thing the quantizer ever sees here, so greys are the only thing it can return.
+    tests/quantize.mjs pins that, since a low-chroma warm yarn added to the palette later
+    would quietly start showing up in greyscale charts.
+  */
+  const greyscale = settings.adjust.saturation <= -1
+
   return (
     <Panel
       title="Picture"
       hint="Yarn has a much narrower range of colour than a photo. Nudging these often does more for the result than anything else here."
     >
+      <Segmented
+        label="Colour"
+        value={greyscale ? 'grey' : 'colour'}
+        options={[
+          { value: 'colour', label: 'Full colour' },
+          { value: 'grey', label: 'Greyscale' },
+        ]}
+        onChange={(v) =>
+          update(
+            (s) => ({ ...s, adjust: { ...s.adjust, saturation: v === 'grey' ? -1 : 0 } }),
+            'greyscale',
+          )
+        }
+      />
+      {greyscale ? (
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--ink-3)' }}>
+          Charted in the greys this palette actually has, so the chart&rsquo;s colour count is
+          the number of grey yarns to buy. Brightness and contrast earn their keep here —
+          with the hues gone, tone is all the separation left.
+        </p>
+      ) : null}
       <Slider
         label="Brightness"
         min={-50}
