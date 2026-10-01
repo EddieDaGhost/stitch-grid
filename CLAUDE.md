@@ -322,6 +322,15 @@ The suites worth knowing about:
   how FEW colours carry the picture: the logo needs 3, the photograph 13. That is what
   `colourProfile` measures, and why it quantizes onto the palette first — the question
   is about yarn, not about pixels.
+- **A number you type has to be allowed to be briefly wrong.** `NumberField` clamped on
+  every keystroke, which reads as careful and is unusable: the gauge minimum is 4, so
+  clearing the field snapped it to 4 instead of going blank, and then typing 1 and 2 to
+  reach 12 gave "41" and then 60 — the leftover 4, the digits after it, and the lot clamped
+  to the maximum. Any two-digit value whose first digit is under the minimum was simply not
+  enterable, which is most of them. The field now holds TEXT while it is being edited and
+  clamps on blur or Enter; a value that is already in range is still pushed live so the
+  chart follows along, and a field left blank puts the last good value back. Anything that
+  validates per-keystroke on a free-text field will reintroduce this.
 - **A stitch's HEIGHT is most of its yarn cost, not its width.** `yardsFor` is a multiple
   of `stitchSpanIn` — across the stitch, then up and back down its post. It used to be a
   multiple of the width alone, which meant double crochet and corner-to-corner got the

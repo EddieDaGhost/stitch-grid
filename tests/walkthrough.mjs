@@ -181,6 +181,71 @@ export default async function run({ page, check, errors, URL }) {
   await setNumber(page, 'Rows per 4 inches', 18)
   check.is('and setting it back restores the rows', (await readChart(page)).rows, coarser.rows)
 
+  /*
+    --- typing a gauge, one key at a time
+
+    Everything above fills the field in one go, which is the easy case and the one that
+    already worked. Typing is the real case, and it was broken in a way no unit test could
+    see: the field clamped on every keystroke, so clearing it snapped to the minimum of 4
+    rather than going blank, and then typing 1 and 2 to reach 12 gave "41" and then 60 —
+    the leftover 4, the digits after it, and the lot clamped to the maximum. A two-digit
+    gauge whose first digit is under 4 was simply not enterable, which is most of them.
+  */
+  const rowGauge = page.getByLabel('Rows per 4 inches', { exact: true })
+  const clearField = async () => {
+    await rowGauge.click()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.press('Backspace')
+    await page.waitForTimeout(100)
+  }
+
+  const before = await readChart(page)
+  await clearField()
+  check.is('a gauge field can be emptied', await rowGauge.inputValue(), '')
+  check.is(
+    'and an empty field changes nothing until you say what you meant',
+    (await readChart(page)).rows,
+    before.rows,
+  )
+
+  await page.keyboard.type('1')
+  await page.waitForTimeout(100)
+  check.is('a first digit below the minimum survives being typed', await rowGauge.inputValue(), '1')
+  check.is('and still has not touched the chart', (await readChart(page)).rows, before.rows)
+
+  await page.keyboard.type('2')
+  await page.waitForTimeout(150)
+  check.is('the second digit lands as typed', await rowGauge.inputValue(), '12')
+  const typed = await readChart(page)
+  check('and a usable value follows through to the chart live', typed.rows !== before.rows)
+  check.near('at the gauge just typed', typed.rows / typed.stitches, 12 / 16, 0.06)
+
+  // Leaving it blank restores what was there, rather than inventing a number for you.
+  await clearField()
+  await rowGauge.blur()
+  await page.waitForTimeout(150)
+  check.is('leaving a field blank puts the last good value back', await rowGauge.inputValue(), '12')
+
+  // The clamp still exists — it just waits until you have finished.
+  await clearField()
+  await page.keyboard.type('999')
+  await page.waitForTimeout(100)
+  check.is('an impossible number is held while you type it', await rowGauge.inputValue(), '999')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(150)
+  check.is('and clamped when you commit it', await rowGauge.inputValue(), '60')
+
+  // A preset arriving mid-edit wins, rather than being masked by a stale draft.
+  await clearField()
+  await page.keyboard.type('5')
+  await page.getByLabel('Stitch type').selectOption({ label: 'Double crochet' })
+  await page.waitForTimeout(200)
+  check.is('a preset chosen mid-edit wins', await rowGauge.inputValue(), '7')
+
+  await setNumber(page, 'Stitches per 4 inches', 16)
+  await setNumber(page, 'Rows per 4 inches', 18)
+  check.is('and the gauge can be typed back to where it was', (await readChart(page)).rows, coarser.rows)
+
   // --- the finished size is reported, not just the cell count
   check('the finished size is shown', await page.getByText(/\d+(\.\d+)?"\s*×/).first().isVisible())
 
