@@ -23,6 +23,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   Loader2,
+  ImagePlus,
 } from 'lucide-react'
 import Dropzone from './components/Dropzone.jsx'
 import CropPanel from './components/CropPanel.jsx'
@@ -57,7 +58,7 @@ import {
   reset,
   undo,
 } from './lib/history.js'
-import { MAX_EDGE, loadSource, refocusSource } from './lib/image.js'
+import { ACCEPTED, MAX_EDGE, loadSource, refocusSource } from './lib/image.js'
 import { chartToPngBlob } from './lib/png.js'
 import { buildChartPdf } from './lib/chartPdf.js'
 import { downloadBlob, downloadData, suggestName } from './lib/download.js'
@@ -124,6 +125,29 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [makeMode])
+
+  /*
+    Swapping the picture.
+
+    The file input used to live only in the empty state, so once a picture was loaded the
+    only way to try a different one was to reload the page — which also threw away the
+    gauge you had just swatched for. `openFile` was always able to do this; there was
+    simply nothing that called it twice.
+
+    Nothing extra needs resetting, because `openFile` already draws the line in the right
+    place: the crop, the target size, the locked and excluded colours, the swaps, the
+    sampler and the colour cap all belong to the picture that is leaving, and the gauge,
+    detail, border, units and reading mode belong to the person and stay.
+  */
+  const picker = useRef(null)
+  const [dropping, setDropping] = useState(false)
+  /*
+    A drag over a child element fires dragleave on the parent, so a plain boolean flickers
+    the whole time you are moving the file towards the middle of the window. Counting
+    enter and leave is the cure; the ref rather than state because it changes several
+    times per frame and nothing renders it directly.
+  */
+  const dragDepth = useRef(0)
 
   const openFile = useCallback(async (file) => {
     setBusy(true)
@@ -387,7 +411,78 @@ export default function App() {
       screen, so it squeezes the stage down to a sliver and the chart — the thing you
       came to look at — ends up a few pixels tall. Stacked, the page scrolls as a page.
     */
-    <div className="flex min-h-[100dvh] flex-col lg:h-[100dvh]">
+    <div
+      className="flex min-h-[100dvh] flex-col lg:h-[100dvh]"
+      /*
+        Dropping a new picture anywhere on the window, which is how anyone who met this
+        app through its empty state will expect to change one.
+
+        Not while making: rule 8. A dropped file is the most drastic edit there is, and a
+        craft table is exactly where something gets dragged across a screen by accident.
+        Files only, so dragging selected text or a link over the page does nothing.
+      */
+      onDragEnter={(event) => {
+        if (makeMode || !event.dataTransfer?.types?.includes('Files')) return
+        dragDepth.current += 1
+        setDropping(true)
+      }}
+      onDragOver={(event) => {
+        if (makeMode || !event.dataTransfer?.types?.includes('Files')) return
+        // Without this the browser navigates to the file and the whole app disappears.
+        event.preventDefault()
+      }}
+      onDragLeave={() => {
+        if (dragDepth.current > 0) dragDepth.current -= 1
+        if (dragDepth.current === 0) setDropping(false)
+      }}
+      onDrop={(event) => {
+        dragDepth.current = 0
+        setDropping(false)
+        if (makeMode || !event.dataTransfer?.types?.includes('Files')) return
+        event.preventDefault()
+        const file = event.dataTransfer.files?.[0]
+        if (file) openFile(file)
+      }}
+    >
+      {/* The mechanism behind the header button, kept out of the layout rather than
+          conditionally rendered so there is always something to click. Deliberately
+          unlabelled: `hidden` is display:none, so it is not in the accessibility tree and
+          nobody ever reaches it — the button is the control and carries the name. Giving
+          it one as well would put the same name on two nodes for no reader's benefit. */}
+      <input
+        ref={picker}
+        type="file"
+        accept={ACCEPTED}
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          // Clearing lets the same file be chosen twice in a row, after an edit elsewhere.
+          event.target.value = ''
+          if (file) openFile(file)
+        }}
+      />
+
+      {dropping ? (
+        /*
+          FIXED, not absolute. Below `lg` the app stacks and the page is taller than the
+          window, so `absolute inset-0` spans the whole scrollable document and centres the
+          prompt at the middle of the PAGE — which on a phone is well below the fold, while
+          the wash still covers everything. It looked broken and tested fine, because the
+          text was in the DOM the whole time.
+        */
+        <div
+          className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-6"
+          style={{ background: 'color-mix(in srgb, var(--surface) 85%, transparent)' }}
+        >
+          <p
+            className="dropzone flex items-center gap-3 px-6 py-5 text-lg font-semibold"
+            data-over="true"
+          >
+            <ImagePlus className="h-6 w-6" aria-hidden="true" />
+            Drop to use this picture instead
+          </p>
+        </div>
+      ) : null}
       <header
         className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2"
         style={{ borderColor: 'var(--line)', background: 'var(--surface)' }}
@@ -414,6 +509,23 @@ export default function App() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {/*
+            Changing the picture, which rule 8 keeps out of making mode along with
+            everything else that can alter a stitch. An accidental tap costs nothing —
+            it opens a file dialog, and cancelling it leaves the chart alone.
+          */}
+          {makeMode ? null : (
+            <button
+              type="button"
+              className="btn-ghost !min-h-11 !px-2.5"
+              aria-label="Change the picture"
+              title="Change the picture"
+              disabled={busy}
+              onClick={() => picker.current?.click()}
+            >
+              <ImagePlus className="h-4 w-4" />
+            </button>
+          )}
           {designMode || makeMode ? (
             <>
               <button
@@ -502,6 +614,17 @@ export default function App() {
           {busy ? (
             <p className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-2)' }}>
               <Loader2 className="h-4 w-4 animate-spin" /> Reading the picture…
+            </p>
+          ) : null}
+          {/* Only the empty state used to show this, because only the empty state could
+              load a file. A picture that failed to swap would have failed in silence. */}
+          {error && !busy ? (
+            <p
+              className="rounded-xl px-4 py-3 text-sm"
+              role="alert"
+              style={{ background: 'var(--attention-soft)', color: 'var(--attention)' }}
+            >
+              {error}
             </p>
           ) : null}
           <Stage

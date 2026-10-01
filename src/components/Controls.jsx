@@ -3,6 +3,7 @@
  * lot of small primitives and none of them is big enough to earn its own module.
  */
 
+import { useState } from 'react'
 import { Lock, Ban, ArrowLeftRight, RotateCcw } from 'lucide-react'
 import { PALETTE, SUBSETS, chartLetter } from '../config/palette.js'
 import { STITCH_PRESETS } from '../config/gauge.js'
@@ -54,7 +55,41 @@ function Slider({ label, value, min, max, step = 1, onChange, onCommit, readout 
   )
 }
 
+/**
+ * A number you type — which means it has to be allowed to be briefly wrong.
+ *
+ * Clamping on every keystroke sounds like the careful thing to do and is unusable. The
+ * gauge minimum is 4, so clearing the field snapped it to 4 instead of going blank, and
+ * then typing 1 and 2 to reach 12 gave "41" and then 60: the leftover 4, your digits
+ * after it, and the whole thing clamped to the maximum. Nobody can type a two-digit
+ * number whose first digit is below the minimum, which is most of them.
+ *
+ * So while the field is being edited it holds TEXT, not a number. `edit.text` is exactly
+ * what was typed — blank, half a number, out of range, whatever — and nothing rewrites it
+ * under the cursor. Only a value that is already usable is pushed upward, so the chart
+ * still follows along as you type; the clamp waits for blur or Enter, when you have
+ * finished saying what you meant. Blank left behind puts the last good value back rather
+ * than inventing one.
+ *
+ * `edit.sent` is the last value this field pushed up, and comparing it to `value` is how
+ * an edit in progress tells its own change apart from somebody else's. A preset, an undo
+ * or a reset arriving mid-edit wins and clears the draft, instead of being masked by it.
+ */
 function NumberField({ label, value, min, max, onChange, suffix }) {
+  const [edit, setEdit] = useState(null)
+  if (edit && edit.sent !== value) setEdit(null)
+  const text = edit ? edit.text : String(value)
+
+  const settle = () => {
+    const typed = Number(text)
+    const next =
+      text.trim() === '' || !Number.isFinite(typed)
+        ? value
+        : Math.min(max, Math.max(min, Math.round(typed)))
+    setEdit(null)
+    if (next !== value) onChange(next)
+  }
+
   return (
     <label className="block">
       <span className="label">{label}</span>
@@ -66,10 +101,20 @@ function NumberField({ label, value, min, max, onChange, suffix }) {
           inputMode="numeric"
           min={min}
           max={max}
-          value={value}
+          value={text}
           onChange={(e) => {
-            const next = Number(e.target.value)
-            if (Number.isFinite(next)) onChange(Math.min(max, Math.max(min, next)))
+            const typed = e.target.value
+            const parsed = Number(typed)
+            const usable =
+              typed.trim() !== '' && Number.isFinite(parsed) && parsed >= min && parsed <= max
+            setEdit({ text: typed, sent: usable ? parsed : (edit?.sent ?? value) })
+            if (usable && parsed !== value) onChange(parsed)
+          }}
+          onBlur={settle}
+          /* Enter is how a lot of people finish a field. Blurring routes it through the
+             same clamp rather than giving Enter its own slightly different rules. */
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
           }}
         />
         {suffix ? (
@@ -439,11 +484,52 @@ export function PalettePanel({ settings, update, commit, chart }) {
 
 export function AdjustPanel({ settings, update, commit }) {
   const set = (key) => (v) => update((s) => ({ ...s, adjust: { ...s.adjust, [key]: v / 100 } }), key)
+
+  /*
+    Greyscale is not a setting of its own — it IS saturation at the bottom of its range,
+    which the app could already do and nobody could find.
+
+    So the toggle is DERIVED rather than stored. One source of truth: drag the slider to
+    -100 and the toggle lights up; press the toggle and the slider moves. A boolean sitting
+    beside the slider would be two names for one state, and sooner or later they disagree —
+    and it would have to be migrated into every saved settings blob for nothing.
+
+    It needs no palette restriction either, which is worth knowing before anyone adds one.
+    Measured: a pure grey ramp quantized against the WHOLE palette lands on exactly the six
+    true greys — Snow, Fog, Silver, Slate, Charcoal, Ink — and never on Cream, Ecru, Oatmeal
+    or Linen, because CIEDE2000 charges those for their chroma. Desaturated pixels are the
+    only thing the quantizer ever sees here, so greys are the only thing it can return.
+    tests/quantize.mjs pins that, since a low-chroma warm yarn added to the palette later
+    would quietly start showing up in greyscale charts.
+  */
+  const greyscale = settings.adjust.saturation <= -1
+
   return (
     <Panel
       title="Picture"
       hint="Yarn has a much narrower range of colour than a photo. Nudging these often does more for the result than anything else here."
     >
+      <Segmented
+        label="Colour"
+        value={greyscale ? 'grey' : 'colour'}
+        options={[
+          { value: 'colour', label: 'Full colour' },
+          { value: 'grey', label: 'Greyscale' },
+        ]}
+        onChange={(v) =>
+          update(
+            (s) => ({ ...s, adjust: { ...s.adjust, saturation: v === 'grey' ? -1 : 0 } }),
+            'greyscale',
+          )
+        }
+      />
+      {greyscale ? (
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--ink-3)' }}>
+          Charted in the greys this palette actually has, so the chart&rsquo;s colour count is
+          the number of grey yarns to buy. Brightness and contrast earn their keep here —
+          with the hues gone, tone is all the separation left.
+        </p>
+      ) : null}
       <Slider
         label="Brightness"
         min={-50}

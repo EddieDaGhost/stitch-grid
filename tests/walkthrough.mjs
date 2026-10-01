@@ -181,6 +181,71 @@ export default async function run({ page, check, errors, URL }) {
   await setNumber(page, 'Rows per 4 inches', 18)
   check.is('and setting it back restores the rows', (await readChart(page)).rows, coarser.rows)
 
+  /*
+    --- typing a gauge, one key at a time
+
+    Everything above fills the field in one go, which is the easy case and the one that
+    already worked. Typing is the real case, and it was broken in a way no unit test could
+    see: the field clamped on every keystroke, so clearing it snapped to the minimum of 4
+    rather than going blank, and then typing 1 and 2 to reach 12 gave "41" and then 60 —
+    the leftover 4, the digits after it, and the lot clamped to the maximum. A two-digit
+    gauge whose first digit is under 4 was simply not enterable, which is most of them.
+  */
+  const rowGauge = page.getByLabel('Rows per 4 inches', { exact: true })
+  const clearField = async () => {
+    await rowGauge.click()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.press('Backspace')
+    await page.waitForTimeout(100)
+  }
+
+  const before = await readChart(page)
+  await clearField()
+  check.is('a gauge field can be emptied', await rowGauge.inputValue(), '')
+  check.is(
+    'and an empty field changes nothing until you say what you meant',
+    (await readChart(page)).rows,
+    before.rows,
+  )
+
+  await page.keyboard.type('1')
+  await page.waitForTimeout(100)
+  check.is('a first digit below the minimum survives being typed', await rowGauge.inputValue(), '1')
+  check.is('and still has not touched the chart', (await readChart(page)).rows, before.rows)
+
+  await page.keyboard.type('2')
+  await page.waitForTimeout(150)
+  check.is('the second digit lands as typed', await rowGauge.inputValue(), '12')
+  const typed = await readChart(page)
+  check('and a usable value follows through to the chart live', typed.rows !== before.rows)
+  check.near('at the gauge just typed', typed.rows / typed.stitches, 12 / 16, 0.06)
+
+  // Leaving it blank restores what was there, rather than inventing a number for you.
+  await clearField()
+  await rowGauge.blur()
+  await page.waitForTimeout(150)
+  check.is('leaving a field blank puts the last good value back', await rowGauge.inputValue(), '12')
+
+  // The clamp still exists — it just waits until you have finished.
+  await clearField()
+  await page.keyboard.type('999')
+  await page.waitForTimeout(100)
+  check.is('an impossible number is held while you type it', await rowGauge.inputValue(), '999')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(150)
+  check.is('and clamped when you commit it', await rowGauge.inputValue(), '60')
+
+  // A preset arriving mid-edit wins, rather than being masked by a stale draft.
+  await clearField()
+  await page.keyboard.type('5')
+  await page.getByLabel('Stitch type').selectOption({ label: 'Double crochet' })
+  await page.waitForTimeout(200)
+  check.is('a preset chosen mid-edit wins', await rowGauge.inputValue(), '7')
+
+  await setNumber(page, 'Stitches per 4 inches', 16)
+  await setNumber(page, 'Rows per 4 inches', 18)
+  check.is('and the gauge can be typed back to where it was', (await readChart(page)).rows, coarser.rows)
+
   // --- the finished size is reported, not just the cell count
   check('the finished size is shown', await page.getByText(/\d+(\.\d+)?"\s*×/).first().isVisible())
 
@@ -205,6 +270,70 @@ export default async function run({ page, check, errors, URL }) {
   // --- joins are surfaced next to the colour count
   // innerText is the RENDERED text, and the label style uppercases it.
   check('colour changes are reported', /colour changes/i.test(await page.getByLabel('Chart summary').innerText()))
+
+  /*
+    --- greyscale
+
+    The app could always do this — saturation has reached -100 since the first version —
+    and nobody could find it. So what is tested is the reachable control, and what it must
+    be is one state rather than two: the toggle is derived from the slider, so the slider
+    has to follow the toggle AND the toggle has to follow the slider. A stored boolean
+    beside the slider would pass a test of the first and fail the second.
+  */
+  const colourGroup = page.getByRole('group', { name: 'Colour', exact: true })
+  const saturation = page.getByLabel('Saturation', { exact: true })
+  const greyButton = colourGroup.getByText('Greyscale')
+  const colourButton = colourGroup.getByText('Full colour')
+  const keyIds = async () =>
+    (await page.getByLabel('Colour key').innerText()).toLowerCase()
+
+  check.is('a picture starts in full colour', await colourButton.getAttribute('aria-pressed'), 'true')
+  const colourKey = await keyIds()
+
+  await greyButton.click()
+  await page.waitForTimeout(250)
+  check.is('the greyscale button takes', await greyButton.getAttribute('aria-pressed'), 'true')
+  check.is('and it IS the saturation slider, pushed to the bottom', await saturation.inputValue(), '-100')
+
+  const greyKey = await keyIds()
+  check('the key changes', greyKey !== colourKey)
+  check(
+    'and lists only greys the palette really has',
+    ['ink', 'charcoal', 'slate', 'silver', 'fog', 'snow'].some((g) => greyKey.includes(g)),
+    greyKey.replace(/\s+/g, ' ').slice(0, 120),
+  )
+  check(
+    'with no warm neutral smuggled in',
+    !/cream|ecru|oatmeal|linen/.test(greyKey),
+    greyKey.replace(/\s+/g, ' ').slice(0, 120),
+  )
+  check(
+    'and it says what that means for shopping',
+    /grey yarns to buy/i.test(await page.getByRole('region', { name: 'Picture' }).innerText()),
+  )
+
+  // Derived, not stored: moving the slider off the bottom has to release the toggle.
+  await saturation.fill('-40')
+  await page.waitForTimeout(200)
+  check.is('dragging saturation off the bottom releases the toggle', await greyButton.getAttribute('aria-pressed'), 'false')
+  check.is('and hands it back to full colour', await colourButton.getAttribute('aria-pressed'), 'true')
+
+  // Greyscale is an edit to the design, so undo has to name it and step out of it.
+  await greyButton.click()
+  await page.waitForTimeout(200)
+  check(
+    'turning it on is an edit undo knows by name',
+    /greyscale/i.test(await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label')),
+    await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label'),
+  )
+  await page.locator('header button[aria-label^="Undo"]').click()
+  await page.waitForTimeout(250)
+  check.is('and undo puts the colour back', await saturation.inputValue(), '-40')
+
+  await colourButton.click()
+  await page.waitForTimeout(250)
+  check.is('going back to full colour zeroes the saturation', await saturation.inputValue(), '0')
+  check.is('and restores the colour key', await keyIds(), colourKey)
 
   // --- undo names the thing it will undo
   const undoLabel = await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label')
@@ -589,6 +718,158 @@ export default async function run({ page, check, errors, URL }) {
 
   await page.getByLabel('Design mode').click()
   await page.waitForTimeout(150)
+
+  /*
+    --- changing your mind about the picture
+
+    Left for last, because swapping deliberately resets everything that belonged to the
+    old picture and would pull the rug from under any assertion after it.
+
+    `openFile` could always do this. The file input simply lived only in the empty state,
+    so once a picture was loaded the only way to try another was to reload the page — and
+    that threw away the gauge you had just swatched for along with it.
+  */
+  const swapButton = page.getByLabel('Change the picture', { exact: true })
+  check('a loaded chart offers a way to change the picture', await swapButton.isVisible())
+
+  // Something to prove survives, and something to prove does not.
+  await setNumber(page, 'Rows per 4 inches', 7)
+  await page.getByLabel('Detail', { exact: true }).fill('20')
+  await page.waitForTimeout(250)
+  const beforeSwap = await readChart(page)
+
+  await page.setInputFiles('input[type=file]', asUpload('portrait.png', photoPng(400, 800)))
+  await page.waitForSelector('[aria-label="Chart summary"]', { timeout: 15000 })
+  await page.waitForTimeout(600)
+
+  const afterSwap = await readChart(page)
+  /*
+    A 1:2 portrait, but the row gauge is 7 per 4 inches, so a row is more than twice the
+    height of a stitch is wide and the chart needs FEWER rows than stitches to come out
+    twice as tall. Asserting "taller picture, more rows" would be the intuitive reading
+    and the wrong one — it is the gauge, not the pixels, that decides.
+  */
+  check.near(
+    'a new picture charts to its own shape, through the gauge',
+    afterSwap.rows / afterSwap.stitches,
+    (1 / 0.5) * (7 / 16),
+    0.08,
+  )
+  check('and is not the chart that was there before', JSON.stringify(afterSwap) !== JSON.stringify(beforeSwap))
+  check.is(
+    'the gauge you swatched for survives the swap',
+    await page.getByLabel('Rows per 4 inches', { exact: true }).inputValue(),
+    '7',
+  )
+  check.is(
+    'and so does the detail you settled on',
+    await page.getByLabel('Detail', { exact: true }).inputValue(),
+    '20',
+  )
+  check.is(
+    'while undo starts clean, because the old stack means nothing now',
+    await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label'),
+    'Undo',
+  )
+
+  /*
+    Dropping a file on the window, which is how anyone who met the app through its empty
+    state will expect to change one. Built here rather than driven through the OS: a real
+    DataTransfer carrying a real File, dispatched as the browser would.
+  */
+  const holdPictureOver = async (name) => {
+    const bytes = [...photoPng(500, 500)]
+    await page.evaluate(
+      ([fileName, data]) => {
+        const dt = new DataTransfer()
+        dt.items.add(new File([new Uint8Array(data)], fileName, { type: 'image/png' }))
+        // Kept on the window so letting go can reuse the same transfer, with the drag
+        // still held in between for as long as an assertion needs.
+        window.__drag = dt
+        const target = document.querySelector('main') ?? document.body
+        for (const type of ['dragenter', 'dragover']) {
+          target.dispatchEvent(new DragEvent(type, { bubbles: true, dataTransfer: dt }))
+        }
+      },
+      [name, bytes],
+    )
+    await page.waitForTimeout(150)
+  }
+  const letGo = async () => {
+    await page.evaluate(() => {
+      const target = document.querySelector('main') ?? document.body
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: window.__drag }))
+    })
+  }
+
+  await holdPictureOver('dropped.png')
+  const prompt = page.getByText(/drop to use this picture/i)
+  /*
+    Visible and ON SCREEN, which are not the same claim. The first version of this read
+    document.body.innerText, which passed while the prompt was painted hundreds of pixels
+    below the fold: the overlay was positioned against the scrollable page rather than the
+    window, so on a phone the whole screen dimmed and nothing explained why.
+  */
+  check('dragging a file over the window says what dropping it will do', await prompt.isVisible())
+  const promptBox = await prompt.boundingBox()
+  const windowBox = page.viewportSize()
+  check(
+    'and says it where you can see it, not below the fold',
+    promptBox && promptBox.y >= 0 && promptBox.y + promptBox.height <= windowBox.height,
+    `prompt at y=${Math.round(promptBox?.y ?? -1)} in a ${windowBox.height}px window`,
+  )
+
+  await letGo()
+  await page.waitForTimeout(900)
+  const dropped = await readChart(page)
+  check.near(
+    'and dropping it charts the square picture at the same gauge',
+    dropped.rows / dropped.stitches,
+    7 / 16,
+    0.08,
+  )
+  check('which is a different chart again', JSON.stringify(dropped) !== JSON.stringify(afterSwap))
+  check(
+    'with the prompt gone once the file lands',
+    !/drop to use this picture/i.test(await page.locator('body').innerText()),
+  )
+
+  /*
+    Rule 8: making mode shows nothing that can alter a stitch, and a dropped file is the
+    most drastic alteration there is. Read the chart before and after rather than during —
+    making mode shows you the row you are on, not the summary.
+  */
+  await page.getByLabel('Make mode').click()
+  await page.waitForTimeout(300)
+  check('making mode does not offer to change the picture', !(await swapButton.isVisible()))
+  await holdPictureOver('ignored.png')
+  await letGo()
+  await page.waitForTimeout(700)
+  await page.getByLabel('Design mode').click()
+  await page.waitForTimeout(250)
+  check.is(
+    'and a file dropped while making is refused',
+    JSON.stringify(await readChart(page)),
+    JSON.stringify(dropped),
+  )
+
+  // A swap that fails has to say so. Only the empty state used to be able to show an
+  // error, because only the empty state could load a file at all.
+  await page.setInputFiles('input[type=file]', {
+    name: 'not-a-picture.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('this is not a png'),
+  })
+  await page.waitForTimeout(800)
+  check(
+    'a file that is not a picture says so rather than failing in silence',
+    /couldn.t be read as an image/i.test(await page.locator('body').innerText()),
+  )
+  check.is(
+    'and leaves the chart you had alone',
+    JSON.stringify(await readChart(page)),
+    JSON.stringify(dropped),
+  )
 
   check.is('no page errors along the way', errors.join(' | '), '')
 }

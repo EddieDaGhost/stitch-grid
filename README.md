@@ -36,7 +36,8 @@ gauge, so what you see is the shape you'll end up holding.
 ## What it does
 
 **Designing**
-- Drag and drop a JPG, PNG or WebP
+- Drag and drop a JPG, PNG or WebP — and drop another over the chart at any time to
+  swap pictures, keeping the gauge, detail and border you already set
 - **Framing**: drag a frame over the photo to pick the part you want. A blanket is a
   long job — it should be spent on the dog, not on the lawn around it. The working copy is
   rebuilt around whatever you framed, so cropping in here is as sharp as cropping in
@@ -51,6 +52,8 @@ gauge, so what you see is the shape you'll end up holding.
   circle in the photo into an oval, which is the exact thing this tool exists to stop
 - Brightness, contrast and saturation — yarn has a much narrower range than a photo,
   so these usually matter more than anything else
+- **Greyscale** in one tap, charted in the greys the palette actually stocks — usually a
+  far shorter shopping list and far fewer joins than the same picture in colour
 - Undo, redo and reset, where a slider drag counts as one step — and the keyboard
   shortcuts your hands already know
 

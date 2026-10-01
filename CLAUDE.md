@@ -322,6 +322,31 @@ The suites worth knowing about:
   how FEW colours carry the picture: the logo needs 3, the photograph 13. That is what
   `colourProfile` measures, and why it quantizes onto the palette first — the question
   is about yarn, not about pixels.
+- **A full-window overlay must be `fixed`, not `absolute`.** Below `lg` the app stacks and
+  the page is taller than the window, so `absolute inset-0` spans the whole scrollable
+  document: the wash covers everything while the thing it is explaining gets centred
+  hundreds of pixels below the fold. Measured at tablet width, the drop prompt landed at
+  y=1903 in a 1112px window. `isVisible()` passes throughout, and so does any assertion on
+  `innerText` — the element is in the DOM and not clipped, just somewhere nobody is
+  looking. Assert a bounding box inside `page.viewportSize()` instead.
+- **Greyscale is saturation, not a palette.** It is `adjust.saturation` at the bottom of
+  its range, and the toggle in the Picture panel is DERIVED from that rather than stored —
+  one source of truth, so the slider and the toggle cannot disagree and no saved settings
+  blob needs migrating. It needs no grey subset: measured, a pure grey ramp quantized
+  against the WHOLE palette lands on exactly the six true greys and never on Cream, Ecru,
+  Oatmeal or Linen, because CIEDE2000 charges a warm neutral for its chroma. That is a
+  property of the current palette, not a guarantee — **add a low-chroma putty or warm grey
+  and greyscale charts will quietly start putting beige in them.** `tests/quantize.mjs`
+  walks all 256 grey levels to catch exactly that.
+- **A number you type has to be allowed to be briefly wrong.** `NumberField` clamped on
+  every keystroke, which reads as careful and is unusable: the gauge minimum is 4, so
+  clearing the field snapped it to 4 instead of going blank, and then typing 1 and 2 to
+  reach 12 gave "41" and then 60 — the leftover 4, the digits after it, and the lot clamped
+  to the maximum. Any two-digit value whose first digit is under the minimum was simply not
+  enterable, which is most of them. The field now holds TEXT while it is being edited and
+  clamps on blur or Enter; a value that is already in range is still pushed live so the
+  chart follows along, and a field left blank puts the last good value back. Anything that
+  validates per-keystroke on a free-text field will reintroduce this.
 - **A stitch's HEIGHT is most of its yarn cost, not its width.** `yardsFor` is a multiple
   of `stitchSpanIn` — across the stitch, then up and back down its post. It used to be a
   multiple of the width alone, which meant double crochet and corner-to-corner got the
