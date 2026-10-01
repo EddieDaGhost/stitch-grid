@@ -42,7 +42,7 @@ import {
 } from './components/Controls.jsx'
 
 import { buildChart, chartHash, emptyChart } from './lib/chart.js'
-import { FULL_FRAME, computeLayout } from './lib/layout.js'
+import { FULL_FRAME, computeLayout, refocusTarget } from './lib/layout.js'
 import { lutFor } from './lib/palette.js'
 import { colourChanges, dimensions, legend, patternText } from './lib/pattern.js'
 import { DEFAULT_SETTINGS, DEFAULT_VIEW, normalizeSettings, settingsKey } from './lib/settings.js'
@@ -57,12 +57,20 @@ import {
   reset,
   undo,
 } from './lib/history.js'
-import { loadSource } from './lib/image.js'
+import { MAX_EDGE, loadSource, refocusSource } from './lib/image.js'
 import { chartToPngBlob } from './lib/png.js'
 import { buildChartPdf } from './lib/chartPdf.js'
 import { downloadBlob, downloadData, suggestName } from './lib/download.js'
 import { loadProgress, loadSettings, saveProgress, saveSettings } from './lib/storage.js'
 import { emptyProgress, makeView, stepBounds, workedMask } from './lib/progress.js'
+
+/**
+ * How long the framing has to sit still before the working copy is rebuilt around it.
+ *
+ * Long enough that dragging a handle across the photo is one re-decode rather than sixty,
+ * short enough that letting go and looking at the result feels like the same gesture.
+ */
+const REFOCUS_DELAY_MS = 350
 
 export default function App() {
   const [source, setSource] = useState(null)
@@ -165,12 +173,82 @@ export default function App() {
     [settings.subsetId, settings.excluded],
   )
 
+  /*
+    `workingWidth` and `view`, never `raster.width`.
+
+    The working copy covers whichever part of the photo is being charted, so its own width
+    is a moving target — read the stitch count off it and tightening the frame would
+    silently make a bigger blanket. `workingWidth` is what a full-frame copy would be, and
+    `view` is what this one actually holds; between them the geometry comes out the same
+    whether or not the pixels have been rebuilt yet.
+  */
   const layout = useMemo(
-    () => (source ? computeLayout(settings, source.aspect, source.raster.width) : null),
+    () => (source ? computeLayout(settings, source.aspect, source.workingWidth, source.view) : null),
     [source, settings],
   )
 
-  const chartKey = settingsKey(settings, source?.id ?? '')
+  /*
+    Re-rasterise the working copy around the crop, once the framing settles.
+
+    Debounced because the alternative is decoding a twelve megapixel photo on every frame
+    of a drag, and deliberately AFTER the chart has already rebuilt from the pixels on
+    hand: the frame you dragged is on screen immediately at the resolution available, and
+    sharpens a moment later. Doing it the other way round would stall the drag itself.
+
+    Deliberately silent. A spinner was written for this and then taken back out: measured
+    here, letting go of the frame puts the crop on screen in 3ms and the sharper version
+    about 800ms later, on a 17 megapixel photo charted at 220 stitches — the extreme case,
+    not a normal one. What changes across that gap is sharpness, not content, so it reads as
+    something settling rather than something breaking. And the indicator itself could not be
+    made to behave: gated at 200ms it never appeared at all, ungated it sat there for 600ms,
+    because where the async boundary falls and when React commits do not line up with how
+    long the wait actually feels. A label that shows on one machine and not another for the
+    same wait is worse than no label. Revisit it only with measurements from a phone.
+
+    Not gated on design mode, and that is the considered choice rather than an oversight.
+    A refocus changes the cells, so it changes `chartHash`, so it would move somebody's
+    place in making mode — but nothing in making mode can change the crop, so the only
+    refocus that can land there is one already pending from a crop a moment earlier, before
+    any row has been worked. Deferring it instead would be worse: it would fire whenever
+    design mode was next opened, which could be forty hours of crochet later, and orphan a
+    position that by then meant something.
+  */
+  const refocusSeq = useRef(0)
+  useEffect(() => {
+    if (!source) return undefined
+    const target = refocusTarget(settings.crop, source.view, {
+      width: source.width,
+      height: source.height,
+      maxEdge: MAX_EDGE,
+    })
+    if (!target) return undefined
+
+    const seq = ++refocusSeq.current
+    const timer = setTimeout(() => {
+      refocusSource(source, target)
+        .then((next) => {
+          // Two guards, because decoding is slow enough for a lot to happen underneath it:
+          // a newer request having started, and a different picture having been opened.
+          if (refocusSeq.current !== seq) return
+          setSource((cur) =>
+            cur && cur.id === next.id && cur.rev === next.rev - 1 ? next : cur,
+          )
+        })
+        .catch(() => {
+          // A failed re-decode is not an error the user needs to see: the chart they are
+          // looking at is still correct, just built from a softer copy than it could be.
+        })
+    }, REFOCUS_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [source, settings.crop])
+
+  /*
+    `rev` is in the key because the pixels can change while every setting stays put. The
+    cache is keyed on the settings precisely so it can skip a rebuild that would produce
+    the same cells — and a refocus is the one thing that produces different cells from
+    identical settings, so without this the sharper copy would never reach the screen.
+  */
+  const chartKey = settingsKey(settings, source ? `${source.id}:${source.rev}` : '')
   const chartCache = useRef({ key: null, chart: null })
 
   const chart = useMemo(() => {

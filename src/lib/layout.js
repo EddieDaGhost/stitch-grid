@@ -32,9 +32,11 @@ export const FULL_FRAME = { x: 0, y: 0, w: 1, h: 1 }
 /**
  * The smallest crop allowed, as a fraction of each axis.
  *
- * Below about a twentieth of the picture you are charting the JPEG artefacts rather
- * than the subject: the working copy is capped at 1024px on its long edge, so a 5%
- * crop is a 51px strip being averaged into sixty stitches.
+ * The working copy is rebuilt to cover the crop, so this is no longer about the budget —
+ * a 5% crop now gets the full 1024px, not a 51px strip of it. What is left is the photo
+ * itself: below about a twentieth of the frame you are charting JPEG blocks and sensor
+ * noise rather than the subject, and no amount of resolution makes those into yarn.
+ * It also keeps four drag handles from landing on top of each other.
  */
 export const MIN_CROP = 0.05
 
@@ -62,6 +64,116 @@ export function normalizeCrop(raw) {
 export function isFullFrame(crop) {
   const c = normalizeCrop(crop)
   return c.x < 1e-9 && c.y < 1e-9 && c.w > 1 - 1e-9 && c.h > 1 - 1e-9
+}
+
+/**
+ * Re-express a crop given in WHOLE-PICTURE coordinates against a working copy that only
+ * covers `view` of the picture.
+ *
+ * The working copy is not always the whole photo. Once the framing settles, the pixels
+ * get rebuilt to cover just the part being charted, so the resolution budget is spent
+ * where it shows — but the crop the user dragged is still a rectangle on the whole photo,
+ * and must stay that way: it is what the framing panel draws, what undo restores and what
+ * gets saved. This is the one place the two coordinate systems meet.
+ *
+ * With `view` the full frame it is the identity, which is why nothing else had to change.
+ *
+ * The two are intersected rather than merely offset, because they go out of step for a
+ * moment every time the framing widens: the crop updates on the drag and the pixels are
+ * rebuilt afterwards, so in between the crop asks for picture the working copy does not
+ * hold. Clamping charts a slightly tight frame for one rebuild; not clamping would
+ * sample past the edge of the raster and smear its border pixels across the difference.
+ */
+export function relativeCrop(crop, view) {
+  const c = normalizeCrop(crop)
+  const v = normalizeCrop(view)
+  const x0 = Math.max(c.x, v.x)
+  const y0 = Math.max(c.y, v.y)
+  const x1 = Math.min(c.x + c.w, v.x + v.w)
+  const y1 = Math.min(c.y + c.h, v.y + v.h)
+  // Disjoint is only reachable mid-rebuild, and only if the crop jumped clean across the
+  // picture. The whole working copy is the honest answer for the one frame it lasts.
+  if (!(x1 > x0) || !(y1 > y0)) return { ...FULL_FRAME }
+  return normalizeCrop({
+    x: (x0 - v.x) / v.w,
+    y: (y0 - v.y) / v.h,
+    w: (x1 - x0) / v.w,
+    h: (y1 - y0) / v.h,
+  })
+}
+
+/**
+ * How much slack to leave around the crop when the working copy is rebuilt, as a fraction
+ * of the crop. Nudging a frame a couple of percent is the most ordinary thing anyone does
+ * in this panel, and without a margin every nudge would re-decode the photo.
+ */
+export const REFOCUS_MARGIN = 0.08
+
+/**
+ * How much sharper a rebuild has to make the working copy before it is worth doing.
+ *
+ * 1.25 is a quarter more pixels along the tighter axis — visible in the chart, since a
+ * stitch is an average of a few dozen pixels and a quarter more of them is a different
+ * average. Lower and the photo is re-decoded for changes nobody could see; higher and a
+ * moderate crop stays soft.
+ */
+export const REFOCUS_GAIN = 1.25
+
+/**
+ * The region the working copy SHOULD cover for this crop, or null if rebuilding it would
+ * not buy anything.
+ *
+ * The resolution budget used to be spent on the whole photo before the crop existed, which
+ * is exactly backwards: the crop is the statement of which pixels matter. A quarter-width
+ * crop of a 4000px photo was charted from a 256px strip of a 1024px copy — three quarters
+ * of the detail the photographer captured, discarded before anyone had said which quarter
+ * of the frame was the subject, and no setting anywhere could get it back.
+ *
+ * Pure, so the awkward parts are provable in bare Node: that it says no to a rebuild it
+ * has just done (or the app re-decodes the photo forever), and that it says no on a small
+ * photo, where the copy is already every pixel there is and a rebuild cannot add one.
+ *
+ * @param crop The user's framing, in whole-picture coordinates.
+ * @param view What the working copy covers now.
+ * @param source `{ width, height }` of the ORIGINAL picture, and the `maxEdge` budget.
+ */
+export function refocusTarget(crop, view, source, options = {}) {
+  const margin = Number.isFinite(options.margin) ? options.margin : REFOCUS_MARGIN
+  const gain = Number.isFinite(options.gain) ? options.gain : REFOCUS_GAIN
+  const c = normalizeCrop(crop)
+  const v = normalizeCrop(view)
+  const px = Math.max(1, Number(source?.width) || 1)
+  const py = Math.max(1, Number(source?.height) || 1)
+  const maxEdge = Math.max(1, Number(source?.maxEdge) || 1)
+
+  const padX = c.w * margin
+  const padY = c.h * margin
+  const target = normalizeCrop({
+    x: c.x - padX,
+    y: c.y - padY,
+    w: c.w + padX * 2,
+    h: c.h + padY * 2,
+  })
+
+  // Widening the frame past what the copy holds is not an optimisation, it is a
+  // correction: `relativeCrop` is clamping the chart to the pixels that exist.
+  const holds =
+    v.x <= c.x + 1e-9 &&
+    v.y <= c.y + 1e-9 &&
+    v.x + v.w >= c.x + c.w - 1e-9 &&
+    v.y + v.h >= c.y + c.h - 1e-9
+
+  /*
+    Pixels of working copy per pixel of original, which is the thing that actually gets
+    better. Comparing the regions' sizes instead would be wrong twice: it ignores which
+    axis the long-edge cap is binding on, and it promises a gain on a small photo where
+    the ratio is already 1 and clamped — so a 600px snapshot would be re-decoded on every
+    nudge of the frame, for pixels that do not exist.
+  */
+  const resolution = (r) => Math.min(1, maxEdge / Math.max(r.w * px, r.h * py))
+  const sharper = resolution(target) >= resolution(v) * gain
+
+  return holds && !sharper ? null : target
 }
 
 /**
@@ -175,22 +287,45 @@ export function detailWasClamped(detailPx, sourceWidthPx) {
  * comes from, in normalised 0..1 coordinates — the user's crop, narrowed further if
  * "fill the grid" had to trim it. Keeping them apart is what lets one composed
  * rectangle answer every "where does this cell come from" question.
+ *
+ * `crop` and `sample` are both in WORKING-COPY coordinates, because the sampler indexes
+ * the working copy. On a full-frame view they are also whole-picture coordinates; once
+ * the view narrows they are not, and `settings.crop` remains the whole-picture version.
  */
 
-/** @returns {Layout} */
-export function computeLayout(settings, sourceAspect, sourceWidthPx) {
+/**
+ * @param {object} settings
+ * @param {number} sourceAspect Aspect of the WHOLE picture, however much of it is loaded.
+ * @param {number} sourceWidthPx Width a FULL-FRAME working copy would have, in pixels.
+ *   Not the raster's own width: the raster gets sharper as the framing tightens, and a
+ *   stitch count read off it would mean the blanket changed size when you cropped.
+ * @param {{x,y,w,h}} [view] Which part of the picture the working copy actually holds.
+ * @returns {Layout}
+ */
+export function computeLayout(settings, sourceAspect, sourceWidthPx, view = FULL_FRAME) {
   const gauge = settings.gauge
   const sourceAspectSafe = sourceAspect > 0 ? sourceAspect : 1
 
-  // A. The crop. Everything below is a question about the CROPPED picture, so its
-  // aspect and its pixel width are what the rest of this function works from.
-  const crop = normalizeCrop(settings.crop)
-  const aspect = sourceAspectSafe * (crop.w / crop.h)
+  // A. The crop, moved into the working copy's coordinates — see `relativeCrop`. Every
+  // rectangle below this line is a rectangle on the RASTER, because that is what the
+  // sampler will index; `view` is the only thing that still speaks whole-picture.
+  const v = normalizeCrop(view)
+  const crop = relativeCrop(settings.crop, v)
+  // The working copy's own aspect, which is the picture's narrowed by the view. Keeping
+  // the two apart here is what stops a refocused raster from charting as a different
+  // shape: `aspect` below comes out identical to `sourceAspect * cropW / cropH` on the
+  // whole picture, whatever the view.
+  const rasterAspect = sourceAspectSafe * (v.w / v.h)
+  const aspect = rasterAspect * (crop.w / crop.h)
   let sample = { u0: crop.x, v0: crop.y, u1: crop.x + crop.w, v1: crop.y + crop.h }
+
+  // How wide the cropped picture is in full-frame pixels — the detail slider's basis, and
+  // deliberately independent of how sharp the working copy currently is.
+  const cropWidthPx = sourceWidthPx * v.w * crop.w
 
   // B + C. The picture's own size, in cells. Detail is pixels per stitch, so cropping
   // to half the width halves the stitch count rather than quietly doubling the detail.
-  let imageW = stitchesForDetail(settings.detailPx, sourceWidthPx * crop.w)
+  let imageW = stitchesForDetail(settings.detailPx, cropWidthPx)
   let imageH = clamp(rowsForAspect(imageW, aspect, gauge), 1, MAX_ROWS)
 
   // C. The border, per axis, from a distance rather than a cell count.
@@ -230,7 +365,7 @@ export function computeLayout(settings, sourceAspect, sourceWidthPx) {
       imageH = interiorH
       imageX = border.sts
       imageY = border.rows
-      sample = coverSample(crop, sourceAspectSafe, gridAspect(interiorW, interiorH, gauge))
+      sample = coverSample(crop, rasterAspect, gridAspect(interiorW, interiorH, gauge))
     } else {
       // Whole picture: fit inside the interior at gauge-correct proportions, centred.
       const wantRows = rowsForAspect(interiorW, aspect, gauge)
@@ -258,10 +393,18 @@ export function computeLayout(settings, sourceAspect, sourceWidthPx) {
     sample,
     stretched,
     padded,
-    // True when anything of the photo is being left out, by the user's crop or by the
-    // grid trimming it further — which is what the UI needs to say so out loud.
-    cropped: sample.u1 - sample.u0 < 1 - 1e-9 || sample.v1 - sample.v0 < 1 - 1e-9,
-    clamped: detailWasClamped(settings.detailPx, sourceWidthPx * crop.w),
+    /*
+      True when anything of the photo is being left out, by the user's crop or by the grid
+      trimming it further — which is what the UI needs to say so out loud.
+
+      Measured back against the WHOLE picture. Read off the sample alone it would come out
+      false the moment the working copy was rebuilt to cover exactly the crop: the sample
+      is then the whole raster, and the notice saying part of the photo is not in the chart
+      would vanish precisely when it became most true.
+    */
+    cropped:
+      v.w * (sample.u1 - sample.u0) < 1 - 1e-9 || v.h * (sample.v1 - sample.v0) < 1 - 1e-9,
+    clamped: detailWasClamped(settings.detailPx, cropWidthPx),
   }
 }
 

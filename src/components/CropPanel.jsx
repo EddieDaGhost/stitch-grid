@@ -34,17 +34,29 @@ export default function CropPanel({ source, settings, update, commit, dim }) {
   const dragRef = useRef(null)
   const [dragging, setDragging] = useState(false)
 
-  // The source raster, straight onto a canvas at its own size. CSS scales it down to
-  // the panel; the working copy is capped at 1024px, so there is nothing to stream.
+  /*
+    The whole picture, straight onto a canvas at its own size. CSS scales it down to the
+    panel; the preview is capped at 1024px, so there is nothing to stream.
+
+    `source.preview`, not `source.raster`. The working copy is rebuilt to cover just the
+    part being charted once the framing settles, so drawing it here would show the frame
+    you already chose filling the panel edge to edge — and there would be no way to widen
+    it again, because the picture around it would have disappeared. The preview is the one
+    copy that stays the whole photo for as long as it is open.
+  */
   useLayoutEffect(() => {
     const canvas = photoRef.current
-    const raster = source?.raster
-    if (!canvas || !raster) return
-    canvas.width = raster.width
-    canvas.height = raster.height
+    const preview = source?.preview
+    if (!canvas || !preview) return
+    canvas.width = preview.width
+    canvas.height = preview.height
     const ctx = canvas.getContext('2d')
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(raster.data), raster.width, raster.height), 0, 0)
-  }, [source])
+    ctx.putImageData(
+      new ImageData(new Uint8ClampedArray(preview.data), preview.width, preview.height),
+      0,
+      0,
+    )
+  }, [source?.preview])
 
   const beginDrag = (event, mode) => {
     if (event.button != null && event.button !== 0) return
