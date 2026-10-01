@@ -322,6 +322,13 @@ The suites worth knowing about:
   how FEW colours carry the picture: the logo needs 3, the photograph 13. That is what
   `colourProfile` measures, and why it quantizes onto the palette first — the question
   is about yarn, not about pixels.
+- **A full-window overlay must be `fixed`, not `absolute`.** Below `lg` the app stacks and
+  the page is taller than the window, so `absolute inset-0` spans the whole scrollable
+  document: the wash covers everything while the thing it is explaining gets centred
+  hundreds of pixels below the fold. Measured at tablet width, the drop prompt landed at
+  y=1903 in a 1112px window. `isVisible()` passes throughout, and so does any assertion on
+  `innerText` — the element is in the DOM and not clipped, just somewhere nobody is
+  looking. Assert a bounding box inside `page.viewportSize()` instead.
 - **Greyscale is saturation, not a palette.** It is `adjust.saturation` at the bottom of
   its range, and the toggle in the Picture panel is DERIVED from that rather than stored —
   one source of truth, so the slider and the toggle cannot disagree and no saved settings

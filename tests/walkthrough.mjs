@@ -719,5 +719,157 @@ export default async function run({ page, check, errors, URL }) {
   await page.getByLabel('Design mode').click()
   await page.waitForTimeout(150)
 
+  /*
+    --- changing your mind about the picture
+
+    Left for last, because swapping deliberately resets everything that belonged to the
+    old picture and would pull the rug from under any assertion after it.
+
+    `openFile` could always do this. The file input simply lived only in the empty state,
+    so once a picture was loaded the only way to try another was to reload the page — and
+    that threw away the gauge you had just swatched for along with it.
+  */
+  const swapButton = page.getByLabel('Change the picture', { exact: true })
+  check('a loaded chart offers a way to change the picture', await swapButton.isVisible())
+
+  // Something to prove survives, and something to prove does not.
+  await setNumber(page, 'Rows per 4 inches', 7)
+  await page.getByLabel('Detail', { exact: true }).fill('20')
+  await page.waitForTimeout(250)
+  const beforeSwap = await readChart(page)
+
+  await page.setInputFiles('input[type=file]', asUpload('portrait.png', photoPng(400, 800)))
+  await page.waitForSelector('[aria-label="Chart summary"]', { timeout: 15000 })
+  await page.waitForTimeout(600)
+
+  const afterSwap = await readChart(page)
+  /*
+    A 1:2 portrait, but the row gauge is 7 per 4 inches, so a row is more than twice the
+    height of a stitch is wide and the chart needs FEWER rows than stitches to come out
+    twice as tall. Asserting "taller picture, more rows" would be the intuitive reading
+    and the wrong one — it is the gauge, not the pixels, that decides.
+  */
+  check.near(
+    'a new picture charts to its own shape, through the gauge',
+    afterSwap.rows / afterSwap.stitches,
+    (1 / 0.5) * (7 / 16),
+    0.08,
+  )
+  check('and is not the chart that was there before', JSON.stringify(afterSwap) !== JSON.stringify(beforeSwap))
+  check.is(
+    'the gauge you swatched for survives the swap',
+    await page.getByLabel('Rows per 4 inches', { exact: true }).inputValue(),
+    '7',
+  )
+  check.is(
+    'and so does the detail you settled on',
+    await page.getByLabel('Detail', { exact: true }).inputValue(),
+    '20',
+  )
+  check.is(
+    'while undo starts clean, because the old stack means nothing now',
+    await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label'),
+    'Undo',
+  )
+
+  /*
+    Dropping a file on the window, which is how anyone who met the app through its empty
+    state will expect to change one. Built here rather than driven through the OS: a real
+    DataTransfer carrying a real File, dispatched as the browser would.
+  */
+  const holdPictureOver = async (name) => {
+    const bytes = [...photoPng(500, 500)]
+    await page.evaluate(
+      ([fileName, data]) => {
+        const dt = new DataTransfer()
+        dt.items.add(new File([new Uint8Array(data)], fileName, { type: 'image/png' }))
+        // Kept on the window so letting go can reuse the same transfer, with the drag
+        // still held in between for as long as an assertion needs.
+        window.__drag = dt
+        const target = document.querySelector('main') ?? document.body
+        for (const type of ['dragenter', 'dragover']) {
+          target.dispatchEvent(new DragEvent(type, { bubbles: true, dataTransfer: dt }))
+        }
+      },
+      [name, bytes],
+    )
+    await page.waitForTimeout(150)
+  }
+  const letGo = async () => {
+    await page.evaluate(() => {
+      const target = document.querySelector('main') ?? document.body
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: window.__drag }))
+    })
+  }
+
+  await holdPictureOver('dropped.png')
+  const prompt = page.getByText(/drop to use this picture/i)
+  /*
+    Visible and ON SCREEN, which are not the same claim. The first version of this read
+    document.body.innerText, which passed while the prompt was painted hundreds of pixels
+    below the fold: the overlay was positioned against the scrollable page rather than the
+    window, so on a phone the whole screen dimmed and nothing explained why.
+  */
+  check('dragging a file over the window says what dropping it will do', await prompt.isVisible())
+  const promptBox = await prompt.boundingBox()
+  const windowBox = page.viewportSize()
+  check(
+    'and says it where you can see it, not below the fold',
+    promptBox && promptBox.y >= 0 && promptBox.y + promptBox.height <= windowBox.height,
+    `prompt at y=${Math.round(promptBox?.y ?? -1)} in a ${windowBox.height}px window`,
+  )
+
+  await letGo()
+  await page.waitForTimeout(900)
+  const dropped = await readChart(page)
+  check.near(
+    'and dropping it charts the square picture at the same gauge',
+    dropped.rows / dropped.stitches,
+    7 / 16,
+    0.08,
+  )
+  check('which is a different chart again', JSON.stringify(dropped) !== JSON.stringify(afterSwap))
+  check(
+    'with the prompt gone once the file lands',
+    !/drop to use this picture/i.test(await page.locator('body').innerText()),
+  )
+
+  /*
+    Rule 8: making mode shows nothing that can alter a stitch, and a dropped file is the
+    most drastic alteration there is. Read the chart before and after rather than during —
+    making mode shows you the row you are on, not the summary.
+  */
+  await page.getByLabel('Make mode').click()
+  await page.waitForTimeout(300)
+  check('making mode does not offer to change the picture', !(await swapButton.isVisible()))
+  await holdPictureOver('ignored.png')
+  await letGo()
+  await page.waitForTimeout(700)
+  await page.getByLabel('Design mode').click()
+  await page.waitForTimeout(250)
+  check.is(
+    'and a file dropped while making is refused',
+    JSON.stringify(await readChart(page)),
+    JSON.stringify(dropped),
+  )
+
+  // A swap that fails has to say so. Only the empty state used to be able to show an
+  // error, because only the empty state could load a file at all.
+  await page.setInputFiles('input[type=file]', {
+    name: 'not-a-picture.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('this is not a png'),
+  })
+  await page.waitForTimeout(800)
+  check(
+    'a file that is not a picture says so rather than failing in silence',
+    /couldn.t be read as an image/i.test(await page.locator('body').innerText()),
+  )
+  check.is(
+    'and leaves the chart you had alone',
+    JSON.stringify(await readChart(page)),
+    JSON.stringify(dropped),
+  )
+
   check.is('no page errors along the way', errors.join(' | '), '')
 }
