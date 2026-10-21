@@ -28,6 +28,7 @@ const SUITES = [
   { name: 'walkthrough', file: './walkthrough.mjs', browser: true },
   { name: 'refocus', file: './refocus.mjs', browser: true },
   { name: 'export', file: './export.mjs', browser: true, clipboard: true },
+  { name: 'resume', file: './resume.mjs', browser: true },
   { name: 'tablet', file: './tablet.mjs', browser: true, ownContexts: true },
 ]
 

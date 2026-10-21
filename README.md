@@ -38,6 +38,11 @@ gauge, so what you see is the shape you'll end up holding.
 **Designing**
 - Drag and drop a JPG, PNG or WebP — and drop another over the chart at any time to
   swap pictures, keeping the gauge, detail and border you already set
+- **Pick up where you left off**: the last picture is kept in this browser and offered
+  back by name next time, with the framing, the colour choices and your place in the
+  chart intact. Offered, never restored behind your back — the empty state is still the
+  empty state, and one tap forgets it. Like everything else here, the picture stays on
+  the device
 - **Framing**: drag a frame over the photo to pick the part you want. A blanket is a
   long job — it should be spent on the dog, not on the lawn around it. The working copy is
   rebuilt around whatever you framed, so cropping in here is as sharp as cropping in
@@ -79,7 +84,9 @@ gauge, so what you see is the shape you'll end up holding.
   without reading a number
 - The same per-cell letters are available here, where the chart *is* the instructions
 - Your place is kept per chart, so closing the tab and coming back tomorrow puts you on
-  the row you left. Change the design and you get a new chart, and a fresh row 1
+  the row you left. Change the design and you get a new chart, and a fresh row 1 — and
+  since the picture is kept too, coming back tomorrow is one tap rather than a re-upload
+  and a re-crop
 - How far in you are, in stitches and in colour changes still to come — not in minutes,
   because nobody can honestly tell you that
 - Keeps the screen awake, because a row takes minutes and both hands are full
@@ -138,6 +145,8 @@ why switching to it cannot change a stitch, and why it works on a corner-to-corn
 reading for free.
 
 Five modules touch the DOM (`image`, `png`, `download`, `storage`, `wakelock`).
+`storage` is the only one that persists anything: settings and your place in localStorage,
+the picture itself in IndexedDB, and nothing anywhere else.
 Everything else runs in bare Node, which is why about 85% of the logic — including the
 entire hand-rolled PDF writer — is covered by a test suite that needs no browser.
 

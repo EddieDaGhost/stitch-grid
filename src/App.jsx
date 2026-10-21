@@ -62,7 +62,15 @@ import { ACCEPTED, MAX_EDGE, loadSource, refocusSource } from './lib/image.js'
 import { chartToPngBlob } from './lib/png.js'
 import { buildChartPdf } from './lib/chartPdf.js'
 import { downloadBlob, downloadData, suggestName } from './lib/download.js'
-import { loadProgress, loadSettings, saveProgress, saveSettings } from './lib/storage.js'
+import {
+  forgetPicture,
+  loadProgress,
+  loadSettings,
+  recallPicture,
+  rememberPicture,
+  saveProgress,
+  saveSettings,
+} from './lib/storage.js'
 import { emptyProgress, makeView, stepBounds, workedMask } from './lib/progress.js'
 
 /**
@@ -80,6 +88,8 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [panelsOpen, setPanelsOpen] = useState(true)
+  /** The last picture this device charted, offered on the empty state. Never auto-loaded. */
+  const [resumable, setResumable] = useState(null)
 
   const settings = history.present
   const designMode = view.mode === 'design'
@@ -149,36 +159,55 @@ export default function App() {
   */
   const dragDepth = useRef(0)
 
-  const openFile = useCallback(async (file) => {
+  /*
+    `fresh` is the whole difference between opening a picture and coming back to one.
+
+    Opening a picture is opening a new document: the framing, the target size, the
+    locked and excluded colours, the swaps, the sampler and the colour cap all belonged
+    to the picture that is leaving, so they go. Resuming is the opposite — the settings
+    on disk ARE this picture's settings, and resetting them would hand somebody back
+    their gauge and nothing else, which is exactly the state the app used to leave them
+    in. Everything kept here is kept because it is still true of the same photo.
+  */
+  const openFile = useCallback(async (file, { fresh = true } = {}) => {
     setBusy(true)
     setError('')
     try {
       const loaded = await loadSource(file)
       setSource(loaded)
+      setResumable(null)
+      // Fire and forget; see `rememberPicture`. Never on the path to the chart.
+      rememberPicture(file)
       // A new picture is a new document, so the old undo stack no longer means anything.
       setHistory((h) =>
         emptyHistory(
           normalizeSettings({
             ...h.present,
             sourceName: loaded.name,
-            // A new picture is a new framing; the last one's crop means nothing here.
-            crop: { ...FULL_FRAME },
-            target: null,
-            locked: [],
-            excluded: [],
-            swaps: {},
-            sampling: loaded.flatArt ? 'mode' : 'area',
-            /*
-              Start at the number of colours the picture actually needs, never above the
-              default. A logo of three flat colours was being charted in twelve, which
-              invented nine shades nobody asked for and turned every clean edge into a
-              speckled one — hundreds of extra joins, each a cut and two woven ends.
+            ...(fresh
+              ? {
+                  // A new picture is a new framing; the last one's crop means nothing here.
+                  crop: { ...FULL_FRAME },
+                  target: null,
+                  locked: [],
+                  excluded: [],
+                  swaps: {},
+                  sampling: loaded.flatArt ? 'mode' : 'area',
+                  /*
+                    Start at the number of colours the picture actually needs, never above
+                    the default. A logo of three flat colours was being charted in twelve,
+                    which invented nine shades nobody asked for and turned every clean edge
+                    into a speckled one — hundreds of extra joins, each a cut and two woven
+                    ends.
 
-              Capped at the default rather than taken outright, so a photograph starts
-              exactly where it always did. This can only ever ask for FEWER colours than
-              before, which is the safe direction for a number that means "skeins to buy".
-            */
-            maxColors: Math.min(DEFAULT_SETTINGS.maxColors, loaded.profile.needed),
+                    Capped at the default rather than taken outright, so a photograph starts
+                    exactly where it always did. This can only ever ask for FEWER colours
+                    than before, which is the safe direction for a number that means
+                    "skeins to buy".
+                  */
+                  maxColors: Math.min(DEFAULT_SETTINGS.maxColors, loaded.profile.needed),
+                }
+              : {}),
           }),
         ),
       )
@@ -188,6 +217,34 @@ export default function App() {
     } finally {
       setBusy(false)
     }
+  }, [])
+
+  /*
+    Offer the last picture back — offer, not restore.
+
+    Dropping somebody straight into a half-finished chart they did not ask for is the
+    reason the picture was never kept at all, and it is still the wrong behaviour: a
+    shared tablet, a borrowed laptop, or simply wanting to start something else. So the
+    empty state stays the empty state and gains a card. One read, on mount, and the file
+    is not decoded until the card is tapped.
+  */
+  useEffect(() => {
+    let live = true
+    recallPicture().then((entry) => {
+      if (live && entry) setResumable(entry)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const resumePicture = useCallback(() => {
+    if (resumable?.file) openFile(resumable.file, { fresh: false })
+  }, [openFile, resumable])
+
+  const forgetResumable = useCallback(() => {
+    setResumable(null)
+    forgetPicture()
   }, [])
 
   // --- the cache chain ----------------------------------------------------
@@ -400,7 +457,16 @@ export default function App() {
   // --- render -------------------------------------------------------------
 
   if (!source) {
-    return <Dropzone onFile={openFile} busy={busy} error={error} />
+    return (
+      <Dropzone
+        onFile={openFile}
+        busy={busy}
+        error={error}
+        resumable={resumable}
+        onResume={resumePicture}
+        onForget={forgetResumable}
+      />
+    )
   }
 
   return (

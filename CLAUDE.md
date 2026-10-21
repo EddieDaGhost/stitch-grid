@@ -106,6 +106,18 @@ ask rather than "improving" it.
    Reading it off `source.raster.width` instead would resize a blanket somebody is forty
    hours into, silently.
 
+14. **The last picture is offered back, never restored.** `storage.js` keeps it in
+   IndexedDB so that coming back to a half-made blanket does not mean re-uploading the
+   photo and re-framing it — settings always survived a closed tab, but re-opening the
+   same file counted as opening a NEW document and reset the crop, the colour cap and
+   the locked colours, so you came back to your gauge and nothing else. The offer is the
+   careful half: the empty state stays the empty state and gains a card with a thumbnail,
+   the file's name and a way to forget it. Restoring silently would make a shared tablet
+   or a borrowed laptop unpleasant, which is the reason the picture was never kept at
+   all, and it is still a good reason. `tests/resume.mjs` crops to a square before
+   reloading for the same reason: a resume that quietly went back to the whole frame
+   passes any check that only asks whether a chart appeared.
+
 ---
 
 ## Ids are permanent
@@ -139,6 +151,8 @@ src/
 │   ├── history.js   Undo
 │   ├── progress.js  Where you are while making: stepping, stats, the chart overlay
 │   └── image/png/download/storage/wakelock.js  ← the ONLY modules that touch the DOM
+│                     storage.js is also the only module that persists anything:
+│                     settings and your place in localStorage, the picture in IndexedDB
 │                     image.js holds the FILE, not the decoded picture, and rebuilds
 │                     the working copy when the framing settles
 ├── components/      All UI
@@ -156,6 +170,7 @@ src/
 - Changing the crochet maths → `src/lib/gauge.js`
 - Changing what gets printed → `src/lib/chartPdf.js`
 - Changing how you keep your place while crocheting → `src/lib/progress.js`
+- Changing what survives a closed tab → `src/lib/storage.js`
 - Changing how it looks → `src/index.css` (tokens) or the component
 
 ---
@@ -283,6 +298,10 @@ The suites worth knowing about:
   softness: one pixel per stitch invented a third colour that is in no part of the photo
   and 70% more joins than the picture contains — a dithered chart, arrived at by accident.
   It also pins the invariant that the rebuild must not change the stitch count.
+- **`resume.mjs`** proves the framing comes back, not merely that a chart does. Settings
+  always survived a reload; what did not was the photo, and re-opening it reset the crop.
+  So the fixture crops to a square first, and the check is that the stitch count after
+  resuming is the cropped one rather than the whole frame's.
 - **`tablet.mjs`** checks the stage's own box, not just the canvas inside it. A canvas
   keeps its size and quietly overflows a collapsed parent, so asserting on the canvas
   alone will happily pass while the chart is a 32-pixel sliver.
