@@ -1,7 +1,7 @@
 /**
  * The yarn palette.
  *
- * These 40 hex values are the ONE place in the codebase where a literal colour is
+ * These 45 hex values are the ONE place in the codebase where a literal colour is
  * allowed. Everything else reads a CSS variable. The difference: these aren't theme,
  * they're *content* — each one stands for a physical ball of yarn sitting in a shop.
  * A theme may not recolour them any more than it may rename a colour the user bought.
@@ -52,6 +52,18 @@ export const PALETTE = [
   { id: 'mustard', name: 'Mustard', hex: '#C99524', groups: ['warm'] },
   { id: 'lemon', name: 'Lemon', hex: '#F1D74B', groups: ['warm'] },
   { id: 'rose', name: 'Rose', hex: '#D87B95', groups: ['warm'] },
+  /*
+    Pumpkin and Fuchsia are here because the warms above are all slightly *softened* —
+    every one of them reads as a yarn shade rather than as an ink. That is right for a
+    photograph and wrong for a logo, which is painted in saturated colour on purpose.
+    Measured against the palette as it stood, a sports orange (#C83803) landed on
+    Terracotta at a CIEDE2000 distance of 9.9 and a bright pink (#E6007E) on Cherry at
+    18.6 — a chart in the wrong colour, not a near miss, since about 2.3 is the point
+    where two colours stop looking the same. Both shades are ordinary solid worsted
+    acrylic; nothing here asks for a yarn that is hard to buy.
+  */
+  { id: 'pumpkin', name: 'Pumpkin', hex: '#DC4810', groups: ['warm'] },
+  { id: 'fuchsia', name: 'Fuchsia', hex: '#D4257F', groups: ['warm'] },
 
   // --- Earths. Skin tones live here too, which is why there are four of them.
   { id: 'terracotta', name: 'Terracotta', hex: '#B05C40', groups: ['earth'] },
@@ -64,6 +76,9 @@ export const PALETTE = [
   { id: 'grass', name: 'Grass', hex: '#6BA444', groups: ['green'] },
   { id: 'moss', name: 'Moss', hex: '#6D7E4D', groups: ['green'] },
   { id: 'forest', name: 'Forest', hex: '#2E5C39', groups: ['green'] },
+  // The clean green of a football shirt. Grass is yellower and Moss is greyer, and a
+  // kelly green landed 14 away from either — far enough to read as the wrong colour.
+  { id: 'shamrock', name: 'Shamrock', hex: '#17874A', groups: ['green'] },
 
   // --- Cools.
   { id: 'seafoam', name: 'Seafoam', hex: '#7FC6B4', groups: ['cool'] },
@@ -72,6 +87,11 @@ export const PALETTE = [
   { id: 'denim', name: 'Denim', hex: '#3E5F82', groups: ['cool'] },
   { id: 'navy', name: 'Navy', hex: '#22314D', groups: ['cool'] },
   { id: 'plum', name: 'Plum', hex: '#6C3460', groups: ['cool'] },
+  // Royal and Violet, for the same reason as Pumpkin: Denim is a dusty mid blue and
+  // Plum is a muted aubergine, so a bright royal and a true purple had nothing to land
+  // on. Both are staple solid shades.
+  { id: 'royal', name: 'Royal', hex: '#1A47A0', groups: ['cool'] },
+  { id: 'violet', name: 'Violet', hex: '#542A90', groups: ['cool'] },
 ]
 
 /**

@@ -58,8 +58,9 @@ gauge, so what you see is the shape you'll end up holding.
   shortcuts your hands already know
 
 **Colours**
-- Matching onto a curated palette of 40 generic yarn colours, or just the neutrals or
-  pastels
+- Matching onto a curated palette of 45 generic yarn colours, or just the neutrals or
+  pastels — including the saturated oranges, greens, pinks, purples and blues a logo is
+  actually painted in, not just the softened shades that suit a photograph
 - The colour count starts where *your picture* needs it, not at a fixed number — drop in
   a three-colour logo and you get a three-colour chart, not a dozen shades invented along
   its edges
