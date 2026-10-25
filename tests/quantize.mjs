@@ -19,10 +19,10 @@ import {
   reduceMap,
   swapMap,
 } from '../src/lib/palette.js'
-import { deltaE2000 } from '../src/lib/color.js'
+import { deltaE2000, hexToRgb, rgbToLab } from '../src/lib/color.js'
 
 export default async function run({ check }) {
-  check.is('the palette is 40 colours', PALETTE.length, 40)
+  check.is('the palette is 45 colours', PALETTE.length, 45)
   check.is('every id is unique', new Set(PALETTE.map((p) => p.id)).size, PALETTE.length)
   check.is('every name is unique', new Set(PALETTE.map((p) => p.name)).size, PALETTE.length)
   check('every entry has a group', PALETTE.every((p) => p.groups?.length > 0))
@@ -34,6 +34,59 @@ export default async function run({ check }) {
   check('neutrals is not empty', subsetIndices('neutrals').length >= 8)
   check('pastels includes neutrals to build on', subsetIndices('pastels').length > 8)
   check.is('an unknown subset falls back to everything', subsetIndices('nonsense').length, PALETTE.length)
+
+  /*
+    --- the shelf has to stock saturated colour, not only yarn-ish colour
+
+    Every warm, green and cool in the original forty was softened a little — which is
+    right for a photograph and wrong for the other thing people chart, which is a logo.
+    A logo is painted in saturated ink on purpose, and measured against the palette as
+    it first shipped, a sports orange landed on Terracotta 9.9 away, a kelly green on
+    Moss 14.0 away and a bright pink on Cherry 18.6 away. About 2.3 is where two colours
+    stop looking the same to the eye, so those are not near misses: the chart came out
+    in a colour the picture does not contain, which is the same failure rule 11 exists
+    to prevent, arrived at from the palette's end instead of the quantizer's.
+
+    Asserted as a bound rather than as examples, because the way this regresses is
+    somebody tidying a shade out of the palette, and no other test would notice.
+  */
+  const saturated = {
+    'a sports orange': '#C83803',
+    'a brighter orange': '#FB4F14',
+    'a true red': '#CE1126',
+    'a kelly green': '#00843D',
+    'a hot pink': '#E6007E',
+    'a royal purple': '#4B2E83',
+    'a royal blue': '#0033A0',
+    'a bright gold': '#FFB612',
+    'a deep maroon': '#7C1C2C',
+  }
+  const nearestDistance = (hex) => {
+    const target = rgbToLab(hexToRgb(hex))
+    return RESOLVED.reduce((best, p) => Math.min(best, deltaE2000(target, p.lab)), Infinity)
+  }
+  for (const [what, hex] of Object.entries(saturated)) {
+    const d = nearestDistance(hex)
+    check(`${what} has a yarn within reach of it`, d <= 9, `${hex} is ${d.toFixed(1)} from the nearest`)
+  }
+
+  /*
+    And the other direction: two yarns the eye cannot tell apart are two skeins to buy,
+    two ends to weave and a legend that asks you to tell Sage from Moss at arm's length.
+    Adding colour to the shelf must not be done by crowding it.
+  */
+  let closest = { d: Infinity, a: '', b: '' }
+  for (let i = 0; i < PALETTE_SIZE; i++) {
+    for (let j = i + 1; j < PALETTE_SIZE; j++) {
+      const d = deltaE2000(RESOLVED[i].lab, RESOLVED[j].lab)
+      if (d < closest.d) closest = { d, a: PALETTE[i].name, b: PALETTE[j].name }
+    }
+  }
+  check(
+    'and no two yarns on the shelf are indistinguishable',
+    closest.d >= 4,
+    `${closest.a} and ${closest.b} are ${closest.d.toFixed(1)} apart`,
+  )
 
   // --- the lookup cube
   const lut = lutFor('all', [])
