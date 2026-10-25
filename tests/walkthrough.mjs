@@ -408,6 +408,90 @@ export default async function run({ page, check, errors, URL }) {
     bordered.rows - afterReset.rows !== bordered.stitches - afterReset.stitches,
     `+${bordered.stitches - afterReset.stitches} sts, +${bordered.rows - afterReset.rows} rows`,
   )
+  /*
+    --- the border colour can be SEEN before it is chosen, and recoloured after
+
+    A native `<select>` cannot put a colour in an `<option>`, so for a panel of forty-five
+    yarn shades it offered "Sage", "Moss", "Linen", "Oatmeal" and nothing to look at.
+    These checks are on the dropdown we draw instead, and then on the thing that makes a
+    hex code worth typing at all: the preview has to change.
+
+    The border is the right place to prove it. It is the one colour that gets its palette
+    index before quantization and is skipped by the remap, so a border shade is on the
+    chart whether or not the photo contains anything like it — which makes "is this exact
+    colour in the preview?" a clean question with a yes or no answer.
+  */
+  const borderSelect = page.getByLabel('Border colour', { exact: true })
+  await borderSelect.click()
+  await page.waitForTimeout(120)
+  const options = page.locator('[role=option]')
+  check('the border dropdown lists every yarn', (await options.count()) >= 40)
+  const optionColours = await page.evaluate(() =>
+    [...document.querySelectorAll('[role=option] .swatch')].map(
+      (el) => getComputedStyle(el).backgroundColor,
+    ),
+  )
+  check(
+    'and each row shows the colour, not just its name',
+    new Set(optionColours).size >= 40,
+    `${new Set(optionColours).size} distinct of ${optionColours.length}`,
+  )
+  check('with none of them left blank', !optionColours.some((c) => !c || c === 'rgba(0, 0, 0, 0)'))
+
+  await options.filter({ hasText: 'Cherry' }).first().click()
+  await page.waitForTimeout(250)
+  check('choosing from it closes the list', (await options.count()) === 0)
+  check.is('and the field names what you picked', (await borderSelect.innerText()).trim(), 'Cherry')
+
+  /** How many pixels of the preview are exactly this colour. */
+  const previewPixels = (rgb) =>
+    page.evaluate((want) => {
+      const canvas = document.querySelector('canvas[data-layer=chart]')
+      const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height)
+      let hits = 0
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] === want[0] && data[i + 1] === want[1] && data[i + 2] === want[2]) hits++
+      }
+      return hits
+    }, rgb)
+
+  const CHERRY = [198, 48, 58]
+  const TYPED = [0, 170, 255]
+  check('the border is drawn in the colour that was picked', (await previewPixels(CHERRY)) > 500)
+
+  // Now the point of the whole feature: the hex of the ball actually in your hand.
+  const hexField = page.getByLabel('Hex code for Cherry', { exact: true })
+  check('the colour you chose offers its hex code', await hexField.isVisible())
+  check.is('starting at the stock shade', (await hexField.inputValue()).toUpperCase(), '#C6303A')
+  await hexField.fill('#00AAFF')
+  await hexField.blur()
+  await page.waitForTimeout(300)
+  check('typing a hex repaints the preview in it', (await previewPixels(TYPED)) > 500)
+  check('and the stock shade is gone from the preview', (await previewPixels(CHERRY)) === 0)
+  check(
+    'the colour key agrees with the screen',
+    await page.evaluate(() =>
+      [...document.querySelectorAll('[aria-label="Colour key"] .swatch')].some(
+        (el) => getComputedStyle(el).backgroundColor === 'rgb(0, 170, 255)',
+      ),
+    ),
+  )
+  check(
+    'and the yarn keeps its name, because it is still the skein you buy',
+    /Cherry/.test(await page.getByLabel('Colour key').innerText()),
+  )
+
+  /*
+    A recolour is an edit to the design, so undo has to know it by name — and it must
+    not be able to move somebody's place in making mode, which is what keeps it out of
+    `settingsKey` and out of `chartHash`.
+  */
+  const hexUndo = await page.locator('header button[aria-label^="Undo"]').getAttribute('aria-label')
+  check('a recolour is an edit undo names', /colour/i.test(hexUndo), hexUndo)
+  await page.locator('header button[aria-label^="Undo"]').click()
+  await page.waitForTimeout(300)
+  check('and undo puts the stock shade back', (await previewPixels(CHERRY)) > 500)
+
   await border.fill('0')
   await page.waitForTimeout(150)
 

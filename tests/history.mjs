@@ -39,6 +39,33 @@ export default async function run({ check }) {
   check.is('unknown locked colours are dropped', wild.locked.join(','), 'cream')
   check.is('unknown swaps are dropped', Object.keys(wild.swaps).join(','), 'sage')
   check.is('adjustments are clamped', wild.adjust.brightness, 1)
+
+  // --- custom hex codes
+  const hexed = normalizeSettings({
+    customHex: {
+      cream: '#c83803',          // ordinary, lowercase
+      navy: 'abc',               // shorthand, no hash
+      sage: '#9BAE8C',           // exactly the stock shade
+      denim: 'not a colour',
+      'not-a-colour': '#000000',
+    },
+  })
+  check.is('a hex is stored uppercase with its hash', hexed.customHex.cream, '#C83803')
+  check.is('shorthand expands', hexed.customHex.navy, '#AABBCC')
+  check('a hex that restates the stock shade is not an override', !('sage' in hexed.customHex))
+  check('an unreadable hex is dropped', !('denim' in hexed.customHex))
+  check('and so is one for a colour that does not exist', !('not-a-colour' in hexed.customHex))
+  check('a non-object customHex never throws', Object.keys(normalizeSettings({ customHex: 7 }).customHex).length === 0)
+  /*
+    Absent from the key on purpose: a custom hex cannot move a stitch, so including it
+    would throw a built chart away to produce identical cells. `restyle` applies it
+    afterwards instead — see chart.js.
+  */
+  check.is(
+    'a recolour does not invalidate the chart cache',
+    settingsKey(hexed, 'a'),
+    settingsKey({ ...hexed, customHex: {} }, 'a'),
+  )
   check('normalizing garbage never throws', normalizeSettings(null) !== null)
   check('normalizing a string never throws', normalizeSettings('nonsense').detailPx === DEFAULT_SETTINGS.detailPx)
 

@@ -134,3 +134,39 @@ export function chartLetter(n) {
   } while (i >= 0)
   return out
 }
+
+/**
+ * A hex somebody typed -> `#RRGGBB`, or null if it cannot be read as a colour.
+ *
+ * Forgiving on the way in and strict on the way out: a leading `#` is optional because
+ * half the world copies colours with it and half without, and the three-digit shorthand
+ * is accepted because it is what a person writes from memory. Uppercase on the way out
+ * so the same colour typed two ways is one value — these strings end up in a settings
+ * key and in a cache key, and `#aabbcc` and `#AABBCC` must not be two of anything.
+ */
+export function normalizeHex(value) {
+  if (typeof value !== 'string') return null
+  const body = value.trim().replace(/^#/, '')
+  if (/^[0-9a-fA-F]{3}$/.test(body)) {
+    return `#${body.split('').map((c) => c + c).join('').toUpperCase()}`
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(body)) return `#${body.toUpperCase()}`
+  return null
+}
+
+const STOCK_HEX = new Map(PALETTE.map((entry) => [entry.id, entry.hex.toUpperCase()]))
+
+/** The stock shade of a palette id, uppercased. `null` for an unknown id. */
+export function stockHex(id) {
+  return STOCK_HEX.get(id) ?? null
+}
+
+/**
+ * The colour this yarn is actually being crocheted in: the user's hex if they have
+ * given one, the shop shade otherwise. The ONE place the UI should read a hex from, so
+ * a swatch, a dropdown row and the chart can never disagree about what Pumpkin looks
+ * like today.
+ */
+export function yarnHex(id, customHex) {
+  return normalizeHex(customHex?.[id]) ?? stockHex(id) ?? '#000000'
+}

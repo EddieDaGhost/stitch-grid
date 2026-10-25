@@ -8,7 +8,7 @@
  * the on-screen preview and the printed pattern from ever disagreeing.
  */
 
-import { PALETTE_SIZE, RESOLVED, composeMaps, excludeMap, histogram, quantize, reduceMap, swapMap }
+import { PALETTE_SIZE, RESOLVED, composeMaps, excludeMap, histogram, quantize, recolour, reduceMap, swapMap }
   from './palette.js'
 import { paletteIndex } from '../config/palette.js'
 import { cellRectToSource, inBorder, inImage } from './layout.js'
@@ -233,6 +233,29 @@ export function compact(cells) {
   for (let i = 0; i < cells.length; i++) out[i] = remap[cells[i]]
 
   return { cells: out, palette: used.map((i) => RESOLVED[i]) }
+}
+
+/**
+ * A Chart with the user's own hex codes in it, and not one stitch moved.
+ *
+ * This is the whole of the custom-colour feature on the chart side, and it is a palette
+ * transform rather than a pipeline stage on purpose:
+ *
+ *   - It is O(colours), not O(cells), so a colour picker can be dragged at sixty frames
+ *     a second without rebuilding anything. `settingsKey` therefore leaves `customHex`
+ *     out, and the built chart stays in the cache across a recolour.
+ *   - It returns a Chart, so the preview, the PNG, the key, the yardage and the PDF all
+ *     pick the new colour up for free — rule one of this module, nothing reaches back
+ *     past the Chart.
+ *   - `chartHash` is over cells and palette IDS, so recolouring does NOT move somebody's
+ *     place in making mode. Correct: a recolour is not a different blanket, it is the
+ *     same blanket in the yarn they actually bought.
+ */
+export function restyle(chart, customHex) {
+  const resolved = recolour(customHex)
+  if (resolved === RESOLVED) return chart
+  const byId = new Map(resolved.map((entry) => [entry.id, entry]))
+  return { ...chart, palette: chart.palette.map((entry) => byId.get(entry.id) ?? entry) }
 }
 
 /** FNV-1a over cells and palette. Cheap cache key for "has the drawing changed?". */

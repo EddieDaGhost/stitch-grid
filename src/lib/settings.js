@@ -6,7 +6,7 @@
  */
 
 import { DEFAULT_GAUGE, MAX_ROWS, MAX_STITCHES, MIN_STITCHES } from '../config/gauge.js'
-import { PALETTE, SUBSETS } from '../config/palette.js'
+import { PALETTE, SUBSETS, normalizeHex, stockHex } from '../config/palette.js'
 import { normalizeGauge } from './gauge.js'
 import { FULL_FRAME, normalizeCrop } from './layout.js'
 
@@ -38,6 +38,14 @@ export const DEFAULT_SETTINGS = {
   locked: [],
   excluded: [],
   swaps: {},
+  /**
+   * `{ paletteId: '#RRGGBB' }` — "the yarn I am using for this colour is really this".
+   *
+   * Recolours a yarn without re-matching the picture against it, which is why it is
+   * absent from `settingsKey`: see `restyle` in chart.js. Ids only, never positions,
+   * for the same reason every other setting records a colour by id.
+   */
+  customHex: {},
   /**
    * How a cell decides its colour.
    *   'area'    average the pixels under it — right for a photograph
@@ -86,6 +94,19 @@ export function normalizeSettings(raw) {
     if (VALID_IDS.has(from) && VALID_IDS.has(to) && from !== to) swaps[from] = to
   }
 
+  const customHex = {}
+  if (s.customHex && typeof s.customHex === 'object') {
+    for (const [id, raw] of Object.entries(s.customHex)) {
+      if (!VALID_IDS.has(id)) continue
+      const hex = normalizeHex(raw)
+      // A hex that merely restates the shop shade is not an override. Dropping it keeps
+      // the saved blob small and makes "is this one custom?" a single key lookup
+      // everywhere, instead of a string compare that has to normalise first.
+      if (!hex || hex === stockHex(id)) continue
+      customHex[id] = hex
+    }
+  }
+
   return {
     gauge: normalizeGauge(s.gauge ?? DEFAULT_SETTINGS.gauge),
     detailPx: Math.round(clamp(s.detailPx, MIN_DETAIL, MAX_DETAIL, DEFAULT_SETTINGS.detailPx)),
@@ -102,6 +123,7 @@ export function normalizeSettings(raw) {
     locked: cleanIds(s.locked),
     excluded: cleanIds(s.excluded),
     swaps,
+    customHex,
     sampling: s.sampling === 'nearest' || s.sampling === 'mode' ? s.sampling : 'area',
     despeckle: Math.round(clamp(s.despeckle, 0, 2, 1)),
     adjust: {

@@ -89,6 +89,40 @@ export default async function run({ browser, check, URL }) {
 
       await assertTapTargets(page, check, `${device.label} design mode`)
 
+      /*
+        The colour controls, with their popovers actually open.
+
+        A closed popover is 0x0 and skipped by the check above, and the hex editor in the
+        Colours panel is collapsed until you ask for it — so neither was being measured at
+        all. Both are new surfaces with their own rows and their own fields, which is
+        exactly the sort of thing that ships at 32px and 14px without anyone noticing.
+      */
+      await page.getByLabel('Border width', { exact: true }).fill('4')
+      await page.waitForTimeout(250)
+      await page.getByLabel('Border colour', { exact: true }).click()
+      await page.waitForTimeout(150)
+      check(
+        `${device.label}: the colour list is open`,
+        (await page.locator('[role=option]').count()) > 10,
+      )
+      await assertTapTargets(page, check, `${device.label} colour list`)
+      await assertNoOverflow(page, check, `${device.label} colour list`)
+      // The list is taller than a phone, so it has to scroll itself rather than the page.
+      const menuFits = await page.evaluate(() => {
+        const menu = document.querySelector('.swatch-menu')
+        return menu ? menu.scrollHeight > menu.clientHeight : false
+      })
+      check(`${device.label}: the colour list scrolls inside itself`, menuFits)
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(150)
+
+      await page.getByLabel(/^Show the hex code for /).first().click()
+      await page.waitForTimeout(200)
+      await assertTapTargets(page, check, `${device.label} hex editor`)
+      await assertNoOverflow(page, check, `${device.label} hex editor`)
+      await page.getByLabel('Border width', { exact: true }).fill('0')
+      await page.waitForTimeout(200)
+
       // --- the slider must not lose its drag to page scrolling
       const touchAction = await page.evaluate(() => {
         const slider = document.querySelector('input[type=range]')

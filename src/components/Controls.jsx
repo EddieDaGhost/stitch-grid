@@ -3,9 +3,9 @@
  * lot of small primitives and none of them is big enough to earn its own module.
  */
 
-import { useState } from 'react'
-import { Lock, Ban, ArrowLeftRight, RotateCcw } from 'lucide-react'
-import { PALETTE, SUBSETS, chartLetter } from '../config/palette.js'
+import { useEffect, useRef, useState } from 'react'
+import { Lock, Ban, ArrowLeftRight, RotateCcw, ChevronDown, Check, Pipette } from 'lucide-react'
+import { PALETTE, SUBSETS, chartLetter, normalizeHex, stockHex, yarnHex } from '../config/palette.js'
 import { STITCH_PRESETS } from '../config/gauge.js'
 import { MAX_COLORS, MAX_DETAIL, MIN_COLORS, MIN_DETAIL } from '../lib/settings.js'
 import { formatSize } from '../lib/gauge.js'
@@ -148,22 +148,220 @@ function Segmented({ label, value, options, onChange }) {
   )
 }
 
-function ColorSelect({ label, value, onChange }) {
+/**
+ * Pick a yarn by looking at it.
+ *
+ * A native `<select>` cannot put a colour in an `<option>` — no browser renders a
+ * swatch there — so for a whole panel of yarn shades it offers a list of names and
+ * nothing else. "Sage", "Moss", "Linen" and "Oatmeal" are not names anybody can
+ * picture, which made choosing a border a matter of picking one, looking at the chart,
+ * and going back. So this is a listbox we draw ourselves, with the swatch in the row.
+ *
+ * `role="option"` buttons sit as DIRECT children of the `role="listbox"`, because an
+ * `<li>` wrapper between the two breaks the ownership an assistive technology walks.
+ * Rows are 44px for the same reason every other control here is: this is operated with
+ * a crochet hook in the other hand.
+ */
+function SwatchSelect({ label, value, customHex, onChange }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
   const current = PALETTE.find((p) => p.id === value)
+
+  /* A popover that can only be dismissed by choosing something is a trap on a touch
+     screen, where there is no Escape key to fall back on. */
+  useEffect(() => {
+    if (!open) return undefined
+    const away = (event) => {
+      if (box.current && !box.current.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [open])
+
+  /* Arrow keys do not move between buttons on their own, and a 45-row list that can
+     only be walked with Tab is not usable with a keyboard. */
+  const navigate = (event) => {
+    const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
+    if (event.key === 'Escape') {
+      setOpen(false)
+      return
+    }
+    if (!step && event.key !== 'Home' && event.key !== 'End') return
+    event.preventDefault()
+    const rows = [...(box.current?.querySelectorAll('[role=option]') ?? [])]
+    const at = rows.indexOf(document.activeElement)
+    const next =
+      event.key === 'Home' ? 0
+      : event.key === 'End' ? rows.length - 1
+      : Math.min(rows.length - 1, Math.max(0, (at < 0 ? 0 : at) + step))
+    rows[next]?.focus()
+  }
+
   return (
-    <label className="block">
-      <span className="label">{label}</span>
-      <span className="mt-1 flex items-center gap-2">
-        <span className="swatch" style={{ background: current?.hex ?? '#fff' }} aria-hidden="true" />
-        <select className="field" aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
-          {PALETTE.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.name}
-            </option>
-          ))}
-        </select>
-      </span>
-    </label>
+    <div ref={box} onKeyDown={navigate}>
+      <span className="label" id={`${label}-label`}>{label}</span>
+      <div className="relative mt-1">
+        <button
+          type="button"
+          className="field flex items-center gap-2 text-left"
+          aria-label={label}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span
+            className="swatch !h-7 !w-7"
+            style={{ background: yarnHex(value, customHex) }}
+            aria-hidden="true"
+          />
+          <span className="min-w-0 flex-1 truncate">{current?.name ?? 'Choose a colour'}</span>
+          <ChevronDown className="h-4 w-4 shrink-0" style={{ color: 'var(--ink-3)' }} aria-hidden="true" />
+        </button>
+        {open ? (
+          <div className="swatch-menu" role="listbox" aria-label={`${label} choices`}>
+            {PALETTE.map((entry) => {
+              const chosen = entry.id === value
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  role="option"
+                  aria-selected={chosen}
+                  className="swatch-option"
+                  autoFocus={chosen}
+                  onClick={() => {
+                    onChange(entry.id)
+                    setOpen(false)
+                  }}
+                >
+                  <span
+                    className="swatch !h-7 !w-7"
+                    style={{ background: yarnHex(entry.id, customHex) }}
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-sm">{entry.name}</span>
+                  {chosen ? (
+                    <Check className="h-4 w-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The hex code of one yarn, as the user's own ball of it actually looks.
+ *
+ * Two ways in, because "enter a hex code" and "find me that colour" are different
+ * people: a native colour input, which on every platform opens the picker the operating
+ * system already taught them, and the six characters themselves for anyone who has a
+ * brand colour written down.
+ *
+ * The text side holds TEXT while it is being edited, for exactly the reason
+ * `NumberField` does — rewriting `#F` to `#FF0000` under the cursor makes the field
+ * impossible to type into. A value that already reads as a colour is pushed live so the
+ * chart follows along; anything else waits for blur or Enter, and a field left in a
+ * state that is not a colour puts the last good one back rather than inventing one.
+ */
+function HexField({ name, id, customHex, onChange }) {
+  const live = yarnHex(id, customHex)
+  const stock = stockHex(id)
+  const custom = live !== stock
+  const [edit, setEdit] = useState(null)
+  if (edit && edit.sent !== live) setEdit(null)
+  const text = edit ? edit.text : live
+
+  const push = (hex) => {
+    if (hex !== live) onChange(hex)
+  }
+
+  const settle = () => {
+    const parsed = normalizeHex(text)
+    setEdit(null)
+    push(parsed ?? live)
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {/*
+        A native colour input, not a canvas of our own. It is the one widget where the
+        platform's version is unambiguously better than anything worth writing here, it
+        is keyboard accessible for free, and `restyle` is cheap enough that the stream of
+        events a drag inside it produces costs nothing.
+      */}
+      <label className="relative shrink-0" style={{ lineHeight: 0 }}>
+        <span className="sr-only">{`Pick ${name} with a colour picker`}</span>
+        <input
+          type="color"
+          className="hex-picker"
+          aria-label={`Pick ${name} with a colour picker`}
+          value={live}
+          onChange={(e) => push(normalizeHex(e.target.value) ?? live)}
+        />
+      </label>
+      <input
+        type="text"
+        className="field numeral"
+        aria-label={`Hex code for ${name}`}
+        inputMode="text"
+        autoCapitalize="characters"
+        spellCheck={false}
+        maxLength={7}
+        placeholder={stock ?? '#000000'}
+        value={text}
+        onChange={(e) => {
+          const typed = e.target.value
+          const parsed = normalizeHex(typed)
+          setEdit({ text: typed, sent: parsed ?? edit?.sent ?? live })
+          if (parsed) push(parsed)
+        }}
+        onBlur={settle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur()
+        }}
+      />
+      <button
+        type="button"
+        className="btn-ghost !min-h-11 !px-2.5"
+        aria-label={`Use the stock shade of ${name}`}
+        title={`Back to the stock ${name} (${stock})`}
+        disabled={!custom}
+        onClick={() => {
+          setEdit(null)
+          onChange(null)
+        }}
+      >
+        <RotateCcw className="h-4 w-4" aria-hidden="true" />
+      </button>
+    </div>
+  )
+}
+
+/**
+ * The update that records — or clears — one yarn's hex. `hex` of null goes back to the
+ * stock shade by REMOVING the key, so "is this custom?" stays a key lookup and a saved
+ * settings blob never fills with colours that say nothing.
+ */
+export function withCustomHex(settings, id, hex) {
+  const next = { ...settings.customHex }
+  if (hex && hex !== stockHex(id)) next[id] = hex
+  else delete next[id]
+  return { ...settings, customHex: next }
+}
+
+/** The hex editor for one yarn, shown under its row once you ask for it. */
+function HexRow({ name, id, settings, update }) {
+  return (
+    <HexField
+      name={name}
+      id={id}
+      customHex={settings.customHex}
+      onChange={(hex) => update((s) => withCustomHex(s, id, hex), `${name} colour`)}
+    />
   )
 }
 
@@ -347,11 +545,20 @@ export function SizePanel({ settings, update, commit, dim, layout }) {
             </p>
           ) : null}
           {settings.fit === 'contain' ? (
-            <ColorSelect
-              label="Fill the spare space with"
-              value={settings.padColorId}
-              onChange={(v) => update((s) => ({ ...s, padColorId: v }), 'fill colour')}
-            />
+            <>
+              <SwatchSelect
+                label="Fill the spare space with"
+                value={settings.padColorId}
+                customHex={settings.customHex}
+                onChange={(v) => update((s) => ({ ...s, padColorId: v }), 'fill colour')}
+              />
+              <HexRow
+                name={PALETTE.find((p) => p.id === settings.padColorId)?.name ?? 'the fill'}
+                id={settings.padColorId}
+                settings={settings}
+                update={update}
+              />
+            </>
           ) : null}
         </>
       ) : null}
@@ -379,11 +586,20 @@ export function BorderPanel({ settings, update, commit, layout }) {
         }
       />
       {settings.border.inches > 0 ? (
-        <ColorSelect
-          label="Border colour"
-          value={settings.border.colorId}
-          onChange={(v) => update((s) => ({ ...s, border: { ...s.border, colorId: v } }), 'border colour')}
-        />
+        <>
+          <SwatchSelect
+            label="Border colour"
+            value={settings.border.colorId}
+            customHex={settings.customHex}
+            onChange={(v) => update((s) => ({ ...s, border: { ...s.border, colorId: v } }), 'border colour')}
+          />
+          <HexRow
+            name={PALETTE.find((p) => p.id === settings.border.colorId)?.name ?? 'the border'}
+            id={settings.border.colorId}
+            settings={settings}
+            update={update}
+          />
+        </>
       ) : null}
     </Panel>
   )
@@ -391,6 +607,10 @@ export function BorderPanel({ settings, update, commit, layout }) {
 
 export function PalettePanel({ settings, update, commit, chart }) {
   const used = chart?.palette ?? []
+  /* One row's editor at a time. The list runs to twenty-four colours, and twenty-four
+     hex fields stacked open is a panel nobody can find anything in. */
+  const [editing, setEditing] = useState(null)
+  const customCount = Object.keys(settings.customHex ?? {}).length
 
   const toggle = (list, id) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
 
@@ -430,13 +650,26 @@ export function PalettePanel({ settings, update, commit, chart }) {
           {used.map((entry, index) => {
             const locked = settings.locked.includes(entry.id)
             const swappedTo = settings.swaps[entry.id]
+            const open = editing === entry.id
             return (
-              <li key={entry.id} className="flex items-center gap-2">
-                <span className="swatch" style={{ background: entry.hex }} aria-hidden="true" />
+              <li key={entry.id} className="flex flex-wrap items-center gap-2">
+                {/* The swatch IS the way in to recolouring it, because that is where
+                    somebody looks when they think "that is not my yarn's colour". */}
+                <button
+                  type="button"
+                  className="btn-ghost !min-h-11 !px-2.5"
+                  aria-label={`${open ? 'Hide' : 'Show'} the hex code for ${entry.name}`}
+                  aria-expanded={open}
+                  title="Set this colour's hex code"
+                  onClick={() => setEditing(open ? null : entry.id)}
+                >
+                  <span className="swatch !h-7 !w-7" style={{ background: entry.hex }} aria-hidden="true" />
+                </button>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{entry.name}</span>
                   <span className="numeral text-xs" style={{ color: 'var(--ink-3)' }}>
                     {chartLetter(index)}
+                    {entry.custom ? ' · your hex' : ''}
                     {swappedTo ? ` → ${PALETTE.find((p) => p.id === swappedTo)?.name}` : ''}
                   </span>
                 </span>
@@ -462,10 +695,38 @@ export function PalettePanel({ settings, update, commit, chart }) {
                 >
                   <Ban className="h-4 w-4" />
                 </button>
+                {/* The editor is tied to the row above it with a rule, because a bare
+                    field sitting between two colours reads as belonging to neither. */}
+                {open ? (
+                  <span className="w-full pl-2" style={{ borderLeft: '2px solid var(--accent)' }}>
+                    <HexRow name={entry.name} id={entry.id} settings={settings} update={update} />
+                  </span>
+                ) : null}
               </li>
             )
           })}
         </ul>
+      ) : null}
+
+      {used.length ? (
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--ink-3)' }}>
+          Tap a swatch to type the hex code of the ball you actually have. That recolours
+          the yarn everywhere — preview, key and printed sheet — without moving a stitch,
+          so the picture is still matched against the shop shades you can buy.
+        </p>
+      ) : null}
+
+      {customCount ? (
+        <button
+          type="button"
+          className="btn-secondary w-full"
+          onClick={() => update((s) => ({ ...s, customHex: {} }), 'custom colours')}
+        >
+          <Pipette className="h-4 w-4" />
+          {customCount === 1
+            ? 'Back to the stock shade'
+            : `Back to the stock shades for all ${customCount} colours`}
+        </button>
       ) : null}
 
       {settings.excluded.length ? (
