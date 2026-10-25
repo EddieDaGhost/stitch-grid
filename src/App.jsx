@@ -42,7 +42,7 @@ import {
   SizePanel,
 } from './components/Controls.jsx'
 
-import { buildChart, chartHash, emptyChart } from './lib/chart.js'
+import { buildChart, chartHash, emptyChart, restyle } from './lib/chart.js'
 import { FULL_FRAME, computeLayout, refocusTarget } from './lib/layout.js'
 import { lutFor } from './lib/palette.js'
 import { colourChanges, dimensions, legend, patternText } from './lib/pattern.js'
@@ -332,7 +332,7 @@ export default function App() {
   const chartKey = settingsKey(settings, source ? `${source.id}:${source.rev}` : '')
   const chartCache = useRef({ key: null, chart: null })
 
-  const chart = useMemo(() => {
+  const builtChart = useMemo(() => {
     if (!source || !layout) return emptyChart(settings.gauge)
     if (chartCache.current.key === chartKey) return chartCache.current.chart
     const built = buildChart({ sat: source.sat, raster: source.raster, layout, settings, lut })
@@ -341,6 +341,17 @@ export default function App() {
     // chartKey is the real dependency — it names every input that can change a cell.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartKey, source, layout, lut])
+
+  /*
+    The user's own hex codes, applied on top of the built chart rather than inside it.
+
+    Deliberately outside the cache above, and outside `chartKey`, because a custom hex
+    cannot change a single cell — it says which colour a yarn IS, not which yarn a cell
+    gets. So recolouring is O(colours) instead of O(cells): a colour picker can be
+    dragged live, and the expensive chart underneath is never thrown away. Everything
+    downstream reads `chart`, so the preview, the key, the PNG and the PDF all agree.
+  */
+  const chart = useMemo(() => restyle(builtChart, settings.customHex), [builtChart, settings.customHex])
 
   const dim = useMemo(() => (chart.stitches ? dimensions(chart) : null), [chart])
   const key = useMemo(() => (chart.stitches ? legend(chart) : []), [chart])

@@ -314,6 +314,96 @@ select.field {
   flex: none;
 }
 
+/* --- Swatch dropdown ---------------------------------------------------- */
+
+/*
+   A listbox we draw ourselves, because no browser will render a colour inside an
+   `<option>`. Absolute rather than fixed on purpose: it is anchored to its own field,
+   which scrolls with the panel column — the fixed-overlay rule applies to things that
+   must cover the WINDOW, and this is not one of them.
+*/
+.swatch-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 17rem;
+  overflow-y: auto;
+  /* Below lg the whole page scrolls; without this, reaching the end of the list carries
+     on scrolling the page out from under the finger. */
+  overscroll-behavior: contain;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: calc(var(--radius) - 3px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.swatch-option {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  /* The same 44px as every other control: this is used with a hook in the other hand. */
+  min-height: 44px;
+  padding: 0 0.5rem;
+  border-radius: calc(var(--radius) - 7px);
+  text-align: left;
+  color: var(--ink);
+}
+
+.swatch-option:hover {
+  background: var(--surface-2);
+}
+
+.swatch-option[aria-selected='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.swatch-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* --- Hex picker --------------------------------------------------------- */
+
+/*
+   The platform's own colour picker, sized to the app's tap target. The vendor pseudo
+   elements are the only way to get rid of the default inset swatch and padding, which
+   otherwise draws a small square in the middle of a big grey box.
+*/
+.hex-picker {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.hex-picker::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.hex-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 7px;
+}
+
+.hex-picker::-moz-color-swatch {
+  border: none;
+  border-radius: 7px;
+}
+
+.hex-picker:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* --- Stage -------------------------------------------------------------- */
 
 .stage {

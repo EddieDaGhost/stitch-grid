@@ -2,7 +2,7 @@
  * The pipeline: source pixels in, a Chart out.
  */
 
-import { buildChart, chartHash, compact, despeckle } from '../src/lib/chart.js'
+import { buildChart, chartHash, compact, despeckle, restyle } from '../src/lib/chart.js'
 import { computeLayout } from '../src/lib/layout.js'
 import { RESOLVED, lutFor, quantize } from '../src/lib/palette.js'
 import {
@@ -72,6 +72,39 @@ export default async function run({ check }) {
   })
   check.is('same picture, same stitch count', scChart.stitches, dcChart.stitches)
   check('but a very different row count', dcChart.rows < scChart.rows)
+
+  /*
+    --- a custom hex recolours the yarn and moves nothing
+
+    The invariant that separates a recolour from a re-match. Somebody typing the hex of
+    the ball in their hand is saying "this yarn is really this colour", not "match my
+    photo against this colour instead" — so every cell must come out of it untouched,
+    the chart's hash with it (because that hash is what holds somebody's place in making
+    mode), and only the hexes the chart is DRAWN with may change.
+  */
+  const plain = make(circle(160, 160, [40, 90, 130], [242, 232, 213]), { detailPx: 12 })
+  const firstId = plain.palette[0].id
+  const painted = restyle(plain, { [firstId]: '#C83803' })
+  check.is('a recolour moves no stitch', painted.cells.join(','), plain.cells.join(','))
+  check.is('and the chart keeps its size', `${painted.stitches}x${painted.rows}`, `${plain.stitches}x${plain.rows}`)
+  check.is('so it cannot move your place in making mode', chartHash(painted), chartHash(plain))
+  check.is('the yarn keeps its id', painted.palette[0].id, firstId)
+  check.is('but carries the hex you typed', painted.palette[0].hex, '#C83803')
+  check.is('with rgb recomputed to match', painted.palette[0].rgb.join(','), '200,56,3')
+  check('and lab too, so the letter on top stays legible', painted.palette[0].lab[0] !== plain.palette[0].lab[0])
+  check('it is marked as yours', painted.palette[0].custom === true)
+  check(
+    'the other colours are untouched',
+    painted.palette.slice(1).every((entry, i) => entry.hex === plain.palette[i + 1].hex),
+  )
+  check('restyling with nothing hands the same chart straight back', restyle(plain, {}) === plain)
+  check('and so does a hex that restates the stock shade',
+    restyle(plain, { [firstId]: plain.palette[0].hex }) === plain)
+  check('an unreadable hex is ignored rather than thrown', restyle(plain, { [firstId]: 'nope' }) === plain)
+  check(
+    'a hex for a colour the chart does not use changes nothing visible',
+    restyle(plain, { fuchsia: '#000000' }).palette.every((e, i) => e.hex === plain.palette[i].hex),
+  )
 
   // --- the border is sacred
   const bordered = make(solid(200, 200, [0, 0, 0]), {

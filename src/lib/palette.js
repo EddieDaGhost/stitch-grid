@@ -12,7 +12,7 @@
  *     one array, so none of them rebuild the cube.
  */
 
-import { PALETTE, subsetIndices } from '../config/palette.js'
+import { PALETTE, normalizeHex, paletteIndex, stockHex, subsetIndices } from '../config/palette.js'
 import { deltaE2000, hexToRgb, labDistanceSq, rgbToLab } from './color.js'
 
 /** Every palette entry, with rgb and lab resolved once at module load. */
@@ -22,6 +22,72 @@ export const RESOLVED = PALETTE.map((entry) => {
 })
 
 export const PALETTE_SIZE = RESOLVED.length
+
+/**
+ * The palette as the user has recoloured it.
+ *
+ * A custom hex is a RESTYLE of a yarn, not a different yarn. "The Pumpkin I am actually
+ * crocheting with is #C83803" changes every place that colour is DRAWN — the preview,
+ * the contrast of the letter on top of it, the key, the printed sheet — and changes
+ * nothing about which cell got which yarn. That is the whole reason it is cheap enough
+ * to follow a colour picker live, and it is also the honest behaviour: rematching the
+ * photo against the edited shade would restructure the chart underneath the row being
+ * edited, and the row could vanish from the list mid-drag.
+ *
+ * So this is deliberately NOT fed to `lutFor`, `NEIGHBOURS` or `reduceMap`. Those are
+ * built from the shop shades, which is what the picture was matched against and what
+ * the user will buy. See `restyle` in chart.js for the other half.
+ */
+const recolourCache = new Map()
+const RECOLOUR_CACHE_MAX = 32
+
+/**
+ * A stable key for a set of overrides: sorted, normalised, and with anything that
+ * merely restates the stock shade dropped, so "no overrides" has exactly one spelling.
+ */
+export function recolourKey(customHex) {
+  if (!customHex || typeof customHex !== 'object') return ''
+  const pairs = []
+  for (const [id, raw] of Object.entries(customHex)) {
+    const hex = normalizeHex(raw)
+    if (!hex || paletteIndex(id) < 0 || hex === stockHex(id)) continue
+    pairs.push(`${id}:${hex}`)
+  }
+  return pairs.sort().join(',')
+}
+
+/**
+ * Every palette entry, with any override applied and `rgb`/`lab` recomputed for it.
+ *
+ * Returns the shared `RESOLVED` array itself when nothing is overridden — identity, not
+ * a copy, so the no-override case costs nothing and downstream memos do not churn.
+ */
+export function recolour(customHex) {
+  const key = recolourKey(customHex)
+  if (!key) return RESOLVED
+  const hit = recolourCache.get(key)
+  if (hit) return hit
+
+  // Read the overrides back out of the KEY rather than off the input, so what is cached
+  // and what the key names cannot drift apart.
+  const overrides = new Map(key.split(',').map((pair) => {
+    const at = pair.indexOf(':')
+    return [pair.slice(0, at), pair.slice(at + 1)]
+  }))
+  const out = RESOLVED.map((entry) => {
+    const hex = overrides.get(entry.id)
+    if (!hex) return entry
+    const rgb = hexToRgb(hex)
+    return { ...entry, hex, rgb, lab: rgbToLab(rgb), custom: true }
+  })
+
+  // Bounded, because a colour picker drag can mint a new key per frame.
+  if (recolourCache.size >= RECOLOUR_CACHE_MAX) {
+    recolourCache.delete(recolourCache.keys().next().value)
+  }
+  recolourCache.set(key, out)
+  return out
+}
 
 /** 5 bits per channel. See `quantize` for why the truncation is harmless. */
 const BITS = 5

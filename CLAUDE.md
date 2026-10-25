@@ -118,6 +118,18 @@ ask rather than "improving" it.
    reloading for the same reason: a resume that quietly went back to the whole frame
    passes any check that only asks whether a chart appeared.
 
+15. **A custom hex recolours a yarn; it does not re-match the picture.** `customHex`
+   says "the Cherry I actually have is this colour", so it changes every place the
+   colour is DRAWN — preview, letters' contrast, key, PDF — and not one cell. That is
+   deliberate twice over. It keeps the cost at O(colours) rather than O(cells), which is
+   what lets a colour picker be dragged live and keeps `customHex` out of `settingsKey`
+   so a built chart survives a recolour; and it keeps the chart from restructuring
+   under the row being edited, which is what re-matching against an edited shade would
+   do — the row you were typing into can vanish from the list mid-drag. The picture is
+   still matched against the shop shades, because those are what you can go and buy.
+   `restyle()` in `chart.js` is the whole of it, and `chartHash` stays over palette
+   **ids**, so a recolour cannot move somebody's place in making mode.
+
 ---
 
 ## Ids are permanent
@@ -172,6 +184,8 @@ src/
 - Changing how you keep your place while crocheting → `src/lib/progress.js`
 - Changing what survives a closed tab → `src/lib/storage.js`
 - Changing how it looks → `src/index.css` (tokens) or the component
+- Changing the colour somebody's own yarn is → `recolour` in `src/lib/palette.js` and
+  `restyle` in `src/lib/chart.js`
 
 ---
 
@@ -298,6 +312,9 @@ The suites worth knowing about:
   softness: one pixel per stitch invented a third colour that is in no part of the photo
   and 70% more joins than the picture contains — a dithered chart, arrived at by accident.
   It also pins the invariant that the rebuild must not change the stitch count.
+- **`chart.mjs`** also pins the recolour invariant: a custom hex must leave every cell,
+  the chart's size and its hash untouched while changing the hex a yarn is drawn with. A
+  hash that moved would send somebody in making mode back to row 1.
 - **`resume.mjs`** proves the framing comes back, not merely that a chart does. Settings
   always survived a reload; what did not was the photo, and re-opening it reset the crop.
   So the fixture crops to a square first, and the check is that the stitch count after
@@ -348,6 +365,17 @@ The suites worth knowing about:
   y=1903 in a 1112px window. `isVisible()` passes throughout, and so does any assertion on
   `innerText` — the element is in the DOM and not clipped, just somewhere nobody is
   looking. Assert a bounding box inside `page.viewportSize()` instead.
+- **A yarn colour is read from `yarnHex(id, customHex)`, never from `PALETTE` directly.**
+  A component that reaches for `entry.hex` shows the shop shade while the chart beside it
+  shows the user's own, and nothing throws — the two just quietly disagree about what
+  Pumpkin looks like. The one place that is still correct is a chart's own `palette`,
+  which `restyle` has already been through.
+- **A native `<select>` cannot show a colour.** No browser renders anything but text in an
+  `<option>`, which is why the yarn pickers are a `role="listbox"` we draw. The
+  `role="option"` buttons are DIRECT children of the listbox: an `<li>` wrapper between
+  the two breaks the ownership assistive technology walks, and it passes every visual
+  check while doing it. `tests/tablet.mjs` opens the list, because a closed popover is
+  0x0 and skipped by the tap-target sweep entirely.
 - **Greyscale is saturation, not a palette.** It is `adjust.saturation` at the bottom of
   its range, and the toggle in the Picture panel is DERIVED from that rather than stored —
   one source of truth, so the slider and the toggle cannot disagree and no saved settings
