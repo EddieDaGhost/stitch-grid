@@ -8,7 +8,7 @@ import { Lock, Ban, ArrowLeftRight, RotateCcw } from 'lucide-react'
 import { PALETTE, SUBSETS, chartLetter } from '../config/palette.js'
 import { STITCH_PRESETS } from '../config/gauge.js'
 import { MAX_COLORS, MAX_DETAIL, MIN_COLORS, MIN_DETAIL } from '../lib/settings.js'
-import { formatSize } from '../lib/gauge.js'
+import { formatSize, rowHeightIn, stitchWidthIn } from '../lib/gauge.js'
 
 /* ---------------------------------------------------------------- primitives */
 
@@ -360,6 +360,26 @@ export function SizePanel({ settings, update, commit, dim, layout }) {
 }
 
 export function BorderPanel({ settings, update, commit, layout }) {
+  const after = settings.border.worked === 'after'
+  const rounds = layout?.border.rounds ?? 0
+
+  /*
+    What the border really measures, which is not always what was asked for.
+
+    Worked into the fabric, the two axes are independent and the band is the requested
+    depth both ways. Worked in rounds at the end it cannot be: a round adds one stitch
+    at the sides and one row top and bottom, and those are different distances. So the
+    readout stops repeating the number on the slider and states the two it actually
+    produces — rule 3, and the one place in this panel where it bites.
+  */
+  const sides = rounds * stitchWidthIn(settings.gauge)
+  const capsIn = rounds * rowHeightIn(settings.gauge)
+  const readout = !settings.border.inches
+    ? 'None'
+    : after
+      ? `${rounds} rounds · ${sides.toFixed(1)}" sides, ${capsIn.toFixed(1)}" top and bottom`
+      : `${settings.border.inches}" · ${layout?.border.sts ?? 0} sts, ${layout?.border.rows ?? 0} rows`
+
   return (
     <Panel
       title="Border"
@@ -372,18 +392,32 @@ export function BorderPanel({ settings, update, commit, layout }) {
         value={Math.round(settings.border.inches * 4)}
         onChange={(v) => update((s) => ({ ...s, border: { ...s.border, inches: v / 4 } }), 'border')}
         onCommit={commit}
-        readout={
-          settings.border.inches
-            ? `${settings.border.inches}" · ${layout?.border.sts ?? 0} sts, ${layout?.border.rows ?? 0} rows`
-            : 'None'
-        }
+        readout={readout}
       />
       {settings.border.inches > 0 ? (
-        <ColorSelect
-          label="Border colour"
-          value={settings.border.colorId}
-          onChange={(v) => update((s) => ({ ...s, border: { ...s.border, colorId: v } }), 'border colour')}
-        />
+        <>
+          <Segmented
+            label="When you work it"
+            value={settings.border.worked}
+            options={[
+              { value: 'with', label: 'As you go' },
+              { value: 'after', label: 'At the end' },
+            ]}
+            onChange={(v) =>
+              update((s) => ({ ...s, border: { ...s.border, worked: v } }), 'when the border is worked')
+            }
+          />
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--ink-3)' }}>
+            {after
+              ? 'The picture is worked on its own, then the border goes round the finished panel in rounds. Making mode counts the rows first and the rounds after them, so nothing of the border is stitched until the picture is done.'
+              : 'The border is part of every row: extra stitches at each end, and extra rows top and bottom.'}
+          </p>
+          <ColorSelect
+            label="Border colour"
+            value={settings.border.colorId}
+            onChange={(v) => update((s) => ({ ...s, border: { ...s.border, colorId: v } }), 'border colour')}
+          />
+        </>
       ) : null}
     </Panel>
   )
@@ -426,7 +460,13 @@ export function PalettePanel({ settings, update, commit, chart }) {
       />
 
       {used.length ? (
-        <ul className="space-y-1.5">
+        /* Bounded, like making mode's run list, because this is the one part of the
+           panel whose height follows the chart. A twenty-colour photo made it a
+           thousand pixels of scrolling on a phone, and — worse — every change to the
+           colour count shoved every panel BELOW it, which is where the border slider
+           lives: start dragging a border and the page jumped as the border colour
+           joined the list. */
+        <ul className="scroll-y max-h-72 space-y-1.5 pr-1">
           {used.map((entry, index) => {
             const locked = settings.locked.includes(entry.id)
             const swappedTo = settings.swaps[entry.id]

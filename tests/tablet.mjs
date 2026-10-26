@@ -96,6 +96,57 @@ export default async function run({ browser, check, URL }) {
       })
       check(`${device.label}: sliders claim the drag from the page`, touchAction === 'none', String(touchAction))
 
+      /*
+        Dragging a slider must not move the page under your finger.
+
+        `touch-action: none` was already there and was never the problem: the page moved
+        because the STAGE had only a minimum height, so it grew to whatever the canvas
+        happened to be. Widening the border makes the chart taller, which made the page
+        taller, which made the browser slide everything to keep its anchor — measured at
+        phone size, 126px of travel while the finger never left the slider. So the
+        assertion is on the page not moving, not on the property that was supposed to
+        stop it: the stage carries a definite height now and `overflow: auto` does the
+        rest, which is what it was always there for.
+
+        Driven through CDP rather than Playwright's mouse because a mouse drag does not
+        exercise touch-action at all, and this is a bug nobody has ever hit with a mouse.
+      */
+      const border = page.getByLabel('Border width', { exact: true })
+      await border.scrollIntoViewIfNeeded()
+      await page.waitForTimeout(250)
+      const track = await border.boundingBox()
+      const midY = track.y + track.height / 2
+      const cdp = await page.context().newCDPSession(page)
+      const finger = (type, x, y) =>
+        cdp.send('Input.dispatchTouchEvent', {
+          type,
+          touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }],
+        })
+
+      const scrollNow = () => page.evaluate(() => Math.round(window.scrollY))
+      const startedAt = await scrollNow()
+      const travel = []
+      await finger('touchStart', track.x + 8, midY)
+      for (let i = 1; i <= 8; i++) {
+        await finger('touchMove', track.x + 8 + ((track.width - 16) * i) / 8, midY)
+        await page.waitForTimeout(40)
+        travel.push(await scrollNow())
+      }
+      await finger('touchEnd', 0, 0)
+      await page.waitForTimeout(250)
+
+      const moved = Math.max(...travel.map((y) => Math.abs(y - startedAt)))
+      check(
+        `${device.label}: dragging the border slider does not scroll the page`,
+        moved === 0,
+        `page moved ${moved}px while the border went ${await border.inputValue()}`,
+      )
+      check(
+        `${device.label}: and the slider itself actually moved`,
+        Number(await border.inputValue()) > 0,
+        `border is ${await border.inputValue()}`,
+      )
+
       // --- the chart is actually visible, not scrolled off somewhere
       const canvas = await page.getByRole('img', { name: /Chart preview/ }).boundingBox()
       check(`${device.label}: the chart is on screen`, canvas && canvas.width > 40 && canvas.height > 40)

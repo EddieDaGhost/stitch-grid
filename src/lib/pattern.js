@@ -21,6 +21,71 @@ export function arrayRowIndex(chart, row) {
 }
 
 /**
+ * How many rounds of this chart's border are worked AFTER the picture, if any.
+ *
+ * Zero for every chart whose border is worked into the fabric as it goes — which is
+ * every chart by default, and every chart made before this existed. Zero too if the
+ * band would swallow the picture, because a border worked round a panel needs a panel.
+ */
+function roundsAfter(chart) {
+  const rounds = chart.meta?.border?.rounds ?? 0
+  const fits = chart.stitches > rounds * 2 && chart.rows > rounds * 2
+  return rounds > 0 && fits ? rounds : 0
+}
+
+/**
+ * The rectangle a reading walks before it starts going round.
+ *
+ * The whole chart, normally. When the border is worked at the end it is the picture
+ * inside that border: those stitches are not part of any row you work: you make the
+ * panel first and the frame goes on afterwards. Every walk over a chart goes through
+ * here, so "which part am I working" is answered in one place rather than by each
+ * caller remembering to subtract the band.
+ */
+export function readingArea(chart) {
+  const d = roundsAfter(chart)
+  if (!d) return { x: 0, y: 0, w: chart.stitches, h: chart.rows }
+  return { x: d, y: d, w: chart.stitches - d * 2, h: chart.rows - d * 2 }
+}
+
+/**
+ * The cells of one border round, in the order the hook meets them.
+ *
+ * Round 1 is the ring that touches the picture and the last round is the outside edge,
+ * because that is the order they are worked: each round goes around what is already
+ * there. Travel is the same direction row 1 goes — right to left along the bottom —
+ * and then up the left side, back along the top and down the right, which is the way
+ * round a right-handed crocheter works with the right side facing.
+ *
+ * The four sides between them touch every cell of the ring exactly once: each edge
+ * owns its own corners and the two uprights stop short of them.
+ */
+export function roundCells(chart, round) {
+  const rounds = roundsAfter(chart)
+  if (round < 1 || round > rounds) return new Int32Array(0)
+
+  const inset = rounds - round
+  const x0 = inset
+  const y0 = inset
+  const x1 = chart.stitches - 1 - inset
+  const y1 = chart.rows - 1 - inset
+  const at = (x, y) => y * chart.stitches + x
+  const out = []
+
+  if (y1 === y0) {
+    for (let x = x1; x >= x0; x--) out.push(at(x, y0))
+  } else if (x1 === x0) {
+    for (let y = y1; y >= y0; y--) out.push(at(x0, y))
+  } else {
+    for (let x = x1; x >= x0; x--) out.push(at(x, y1))
+    for (let y = y1 - 1; y > y0; y--) out.push(at(x0, y))
+    for (let x = x0; x <= x1; x++) out.push(at(x, y0))
+    for (let y = y0 + 1; y < y1; y++) out.push(at(x1, y))
+  }
+  return Int32Array.from(out)
+}
+
+/**
  * Which side you're looking at, and which way you work.
  *
  * Row 1 is the right side and is worked RIGHT TO LEFT. After you turn, row 2 is the
@@ -53,13 +118,15 @@ export function rowSide(row, startsOnRightSide = true) {
  * pattern and the progress mask alike — goes through here, so the direction rule stays
  * in one place rather than being re-derived by each caller.
  */
-export function rowCells(chart, row, startsOnRightSide = true) {
-  const y = arrayRowIndex(chart, row)
+export function rowCells(chart, row, startsOnRightSide = true, area = readingArea(chart)) {
+  // Row 1 is the bottom row OF THE AREA, which is the whole chart unless the border is
+  // being left until the end.
+  const y = area.y + area.h - row
   const { reversed } = rowSide(row, startsOnRightSide)
-  const out = new Int32Array(chart.stitches)
-  for (let k = 0; k < chart.stitches; k++) {
-    const x = reversed ? chart.stitches - 1 - k : k
-    out[k] = y * chart.stitches + x
+  const out = new Int32Array(area.w)
+  for (let k = 0; k < area.w; k++) {
+    const x = reversed ? area.w - 1 - k : k
+    out[k] = y * chart.stitches + (area.x + x)
   }
   return out
 }
@@ -71,14 +138,15 @@ export function rowCells(chart, row, startsOnRightSide = true) {
  * Direction alternates band to band the same way rows do, because you turn at the end
  * of each one.
  */
-export function c2cBandCells(chart, band) {
-  const { stitches, rows } = chart
+export function c2cBandCells(chart, band, area = readingArea(chart)) {
   const d = band - 1
   const coords = []
   for (let k = 0; k <= d; k++) {
     const x = k
-    const y = rows - 1 - (d - k)
-    if (x >= 0 && x < stitches && y >= 0 && y < rows) coords.push(y * stitches + x)
+    const y = area.h - 1 - (d - k)
+    if (x >= 0 && x < area.w && y >= 0 && y < area.h) {
+      coords.push((area.y + y) * chart.stitches + (area.x + x))
+    }
   }
   if (d % 2 === 0) coords.reverse()
   return Int32Array.from(coords)
@@ -98,11 +166,41 @@ function runsFrom(chart, cells) {
 
 /** Run-length encode every row, bottom row first. @returns {RowInstruction[]} */
 export function encodeRows(chart, { startsOnRightSide = true } = {}) {
+  const area = readingArea(chart)
   const out = []
-  for (let row = 1; row <= chart.rows; row++) {
+  for (let row = 1; row <= area.h; row++) {
     const { side, direction } = rowSide(row, startsOnRightSide)
-    const runs = runsFrom(chart, rowCells(chart, row, startsOnRightSide))
-    out.push({ row, side, direction, runs, total: chart.stitches })
+    const runs = runsFrom(chart, rowCells(chart, row, startsOnRightSide, area))
+    out.push({ row, kind: 'row', side, direction, runs, total: area.w })
+  }
+  return out
+}
+
+/**
+ * The border, worked round the finished panel.
+ *
+ * Appended to whichever reading made the panel, so the two together still visit every
+ * stitch of the chart exactly once — which is the invariant the progress tracker is
+ * built on, and the reason this is a continuation of the same reading rather than a
+ * second one alongside it.
+ *
+ * `row` carries the step's position in the whole reading, not the round number, because
+ * everything that walks a reading looks a step up by it. `round` is the number to print.
+ */
+export function encodeBorderRounds(chart, after = 0) {
+  const rounds = roundsAfter(chart)
+  const out = []
+  for (let round = 1; round <= rounds; round++) {
+    const cells = roundCells(chart, round)
+    out.push({
+      row: after + round,
+      kind: 'round',
+      round,
+      side: 'RS',
+      direction: '↺',
+      runs: runsFrom(chart, cells),
+      total: cells.length,
+    })
   }
   return out
 }
@@ -119,16 +217,19 @@ export function encodeRows(chart, { startsOnRightSide = true } = {}) {
  * way rows do, because you turn at the end of each one.
  */
 export function encodeC2C(chart) {
-  const { stitches, rows } = chart
+  const area = readingArea(chart)
+  const stitches = area.w
+  const rows = area.h
   const bands = stitches + rows - 1
   const out = []
 
   for (let d = 0; d < bands; d++) {
-    const cells = c2cBandCells(chart, d + 1)
+    const cells = c2cBandCells(chart, d + 1, area)
     if (!cells.length) continue
 
     out.push({
       row: d + 1,
+      kind: 'band',
       phase: d < Math.min(stitches, rows) ? 'increase' : 'decrease',
       direction: d % 2 === 1 ? '↗' : '↙',
       runs: runsFrom(chart, cells),
@@ -144,12 +245,36 @@ export function encodeC2C(chart) {
  * the written pattern, the progress tracker — works on either without branching.
  */
 export function readingFor(chart, { mode = 'rows', startsOnRightSide = true } = {}) {
-  return mode === 'c2c' ? encodeC2C(chart) : encodeRows(chart, { startsOnRightSide })
+  const panel = mode === 'c2c' ? encodeC2C(chart) : encodeRows(chart, { startsOnRightSide })
+  return [...panel, ...encodeBorderRounds(chart, panel.length)]
+}
+
+/**
+ * What to call one step of a reading.
+ *
+ * Here rather than in the components so the screen, the written pattern and the printed
+ * sheet cannot end up calling the same step different things — the same reason the
+ * legend's letters are derived once and shared.
+ */
+export function stepLabel(entry) {
+  if (!entry) return ''
+  return entry.kind === 'round' ? `Round ${entry.round}` : `Row ${entry.row}`
+}
+
+/** How many steps the picture itself takes, before any border rounds. */
+function panelSteps(chart, mode) {
+  const area = readingArea(chart)
+  return mode === 'c2c' ? area.w + area.h - 1 : area.h
 }
 
 /** Array indices worked in one step of that reading, in working order. */
 export function stepCells(chart, step, { mode = 'rows', startsOnRightSide = true } = {}) {
-  return mode === 'c2c' ? c2cBandCells(chart, step) : rowCells(chart, step, startsOnRightSide)
+  const panel = panelSteps(chart, mode)
+  if (step > panel) return roundCells(chart, step - panel)
+  const area = readingArea(chart)
+  return mode === 'c2c'
+    ? c2cBandCells(chart, step, area)
+    : rowCells(chart, step, startsOnRightSide, area)
 }
 
 /** Cells per colour, most used first. */
@@ -194,7 +319,10 @@ export function estimateYarn(chart) {
  * number the "fewer colours" slider is optimising the wrong thing.
  */
 export function colourChanges(chart, opts) {
-  return encodeRows(chart, opts).reduce((total, row) => total + Math.max(0, row.runs.length - 1), 0)
+  // The whole reading, border rounds included: leaving the frame until the end changes
+  // when you work those joins, not whether you work them.
+  return readingFor(chart, { mode: 'rows', ...opts })
+    .reduce((total, step) => total + Math.max(0, step.runs.length - 1), 0)
 }
 
 /** Headline numbers for the summary bar and the PDF cover. */
@@ -235,18 +363,22 @@ export function patternText(chart, { startsOnRightSide = true, mode = 'rows', ti
   lines.push('', 'Yarn estimates are rough. Buy about 20% more than listed.', '')
 
   const name = (index) => chart.palette[index]?.name ?? '?'
-  if (mode === 'c2c') {
-    lines.push('Corner to corner', '')
-    for (const band of encodeC2C(chart)) {
-      const runs = band.runs.map((r) => `${r.count} ${name(r.index)}`).join(', ')
-      lines.push(`Row ${band.row} (${band.phase}, ${band.direction}): ${runs}  (${band.total})`)
+  lines.push(mode === 'c2c' ? 'Corner to corner' : 'Worked in rows, from the bottom up', '')
+
+  let heading = false
+  for (const entry of readingFor(chart, { mode, startsOnRightSide })) {
+    if (entry.kind === 'round' && !heading) {
+      heading = true
+      lines.push(
+        '',
+        'Border, worked in rounds around the finished panel',
+        'Round 1 goes around the picture; each one after that goes around the last.',
+        '',
+      )
     }
-  } else {
-    lines.push('Worked in rows, from the bottom up', '')
-    for (const row of encodeRows(chart, { startsOnRightSide })) {
-      const runs = row.runs.map((r) => `${r.count} ${name(r.index)}`).join(', ')
-      lines.push(`Row ${row.row} (${row.side}, ${row.direction}): ${runs}  (${row.total})`)
-    }
+    const runs = entry.runs.map((r) => `${r.count} ${name(r.index)}`).join(', ')
+    const how = entry.kind === 'round' ? entry.direction : `${entry.phase ?? entry.side}, ${entry.direction}`
+    lines.push(`${stepLabel(entry)} (${how}): ${runs}  (${entry.total})`)
   }
   return lines.join('\n')
 }

@@ -55,6 +55,36 @@ export default async function run({ check }) {
   check.is('the border widens the chart by both sides', bordered.stitches, 50 + 16)
   check.is('the border heightens the chart by both sides', bordered.rows, 56 + 18)
   check.is('the picture keeps its own size', `${bordered.image.w},${bordered.image.h}`, '50,56')
+
+  /*
+    The same border, worked at the end instead.
+
+    A round goes all the way around, so it adds one stitch at each side and one row top
+    and bottom — the count has to be the same both ways, where a border worked into the
+    fabric is free to be 8 and 9. The picture inside is untouched either way: a border
+    is added AROUND a picture and never by squashing it.
+  */
+  const rounded = computeLayout(
+    settings({ gauge: SC, detailPx: 16, border: { inches: 2, colorId: 'cream', worked: 'after' } }),
+    1.0,
+    800,
+  )
+  check.is('a border worked at the end is a whole number of rounds', rounded.border.rounds, 8)
+  check.is('which is the same count on both axes', `${rounded.border.sts},${rounded.border.rows}`, '8,8')
+  check.is('the picture is still its own size', `${rounded.image.w},${rounded.image.h}`, '50,56')
+  check.is('and the chart grows by the band on each side', rounded.stitches, 50 + 16)
+  // 8 rounds at this gauge is 2.00" at the sides and 1.78" top and bottom: the same
+  // count cannot be the same distance both ways, and the panel says both numbers.
+  check.is('the band is the same count where it used to be 8 and 9', rounded.rows, 56 + 16)
+  check.is(
+    'no border asked for means no rounds, whichever way it would be worked',
+    computeLayout(
+      settings({ gauge: SC, detailPx: 16, border: { inches: 0, colorId: 'cream', worked: 'after' } }),
+      1.0,
+      800,
+    ).border.rounds,
+    0,
+  )
   check.is('the picture is inset by the border', `${bordered.image.x},${bordered.image.y}`, '8,9')
   check('the border band is border', inBorder(bordered, 0, 0))
   check('the middle is not border', !inBorder(bordered, 33, 37))

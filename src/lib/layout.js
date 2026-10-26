@@ -22,7 +22,8 @@
  */
 
 import { MAX_ROWS, MAX_STITCHES, MIN_STITCHES } from '../config/gauge.js'
-import { inchesToRows, inchesToStitches, rowsForAspect, stitchesForRows } from './gauge.js'
+import { borderRounds, inchesToRows, inchesToStitches, rowsForAspect, stitchesForRows }
+  from './gauge.js'
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
@@ -276,7 +277,7 @@ export function detailWasClamped(detailPx, sourceWidthPx) {
 /**
  * @typedef {{
  *   stitches: number, rows: number,
- *   border: { sts: number, rows: number },
+ *   border: { sts: number, rows: number, rounds: number },
  *   image:  { x: number, y: number, w: number, h: number },
  *   crop:   { x: number, y: number, w: number, h: number },
  *   sample: { u0: number, v0: number, u1: number, v1: number },
@@ -328,11 +329,24 @@ export function computeLayout(settings, sourceAspect, sourceWidthPx, view = FULL
   let imageW = stitchesForDetail(settings.detailPx, cropWidthPx)
   let imageH = clamp(rowsForAspect(imageW, aspect, gauge), 1, MAX_ROWS)
 
-  // C. The border, per axis, from a distance rather than a cell count.
-  const border = {
-    sts: settings.border.inches > 0 ? inchesToStitches(settings.border.inches, gauge) : 0,
-    rows: settings.border.inches > 0 ? inchesToRows(settings.border.inches, gauge) : 0,
-  }
+  /*
+    C. The border, per axis, from a distance rather than a cell count.
+
+    Worked into the fabric as you go, the two axes are independent, so the band is the
+    same depth in inches on both. Worked round the finished panel at the end it cannot
+    be: one round adds one stitch at each side and one row top and bottom, so the count
+    is the same number both ways and the INCHES come out slightly different. That is a
+    fact about crochet rather than a rounding choice, and the Border panel says which
+    two numbers you are actually getting.
+  */
+  const rounds = settings.border.worked === 'after' ? borderRounds(settings.border.inches, gauge) : 0
+  const border = rounds
+    ? { sts: rounds, rows: rounds, rounds }
+    : {
+        sts: settings.border.inches > 0 ? inchesToStitches(settings.border.inches, gauge) : 0,
+        rows: settings.border.inches > 0 ? inchesToRows(settings.border.inches, gauge) : 0,
+        rounds: 0,
+      }
 
   let stitches = imageW + border.sts * 2
   let rows = imageH + border.rows * 2

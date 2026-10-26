@@ -213,12 +213,23 @@ export function makeView(chart, progress, opts = {}) {
  * Corner-to-corner has no stitch numbering across a diagonal, so there it is simply
  * the block's position in the band.
  */
-export function runRange(entry, runIndex, { mode = 'rows', stitches = 0 } = {}) {
+export function runRange(entry, runIndex, { mode = 'rows', stitches = 0, offset = 0 } = {}) {
   if (!entry || !entry.runs[runIndex]) return null
   let start = 0
   for (let i = 0; i < runIndex; i++) start += entry.runs[i].count
   const count = entry.runs[runIndex].count
 
-  if (mode === 'c2c' || entry.side === 'RS') return { from: start + 1, to: start + count }
-  return { from: stitches - start, to: stitches - start - count + 1 }
+  // A round has no stitch numbering across the chart to match — it travels all four
+  // sides — so its runs are counted from the start of the round, like a C2C diagonal.
+  if (mode === 'c2c' || entry.kind === 'round') return { from: start + 1, to: start + count }
+
+  /*
+    `offset` is how far in from the chart's right-hand edge the worked area begins, which
+    is zero unless the border is being left until the end. The numbers still have to be
+    the ones PRINTED along the chart, so a picture row inside a six-round border starts at
+    printed stitch 7 rather than at 1 — the maker is counting against the sheet, not
+    against the sub-rectangle this reading happens to walk.
+  */
+  if (entry.side === 'RS') return { from: offset + start + 1, to: offset + start + count }
+  return { from: stitches - offset - start, to: stitches - offset - start - count + 1 }
 }

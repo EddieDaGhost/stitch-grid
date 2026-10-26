@@ -288,4 +288,88 @@ export default async function run({ check }) {
   const plainWalk = walk(plain, plainRows)
   check.is('a one-colour chart takes one tick per row', plainWalk.ticks, 3)
   check.is('and still finishes', progressStats(plainRows, plainWalk.progress).stitchesDone, 18)
+
+  /* ---------------------------------------------------------------------------
+     The same invariants, with the border left until the end.
+
+     Making mode does not know a round from a row — it walks whatever the reading hands
+     it — so the way this breaks is not an exception but a quiet miscount: a tracker
+     that says 94% on the last round, or an overlay that marks a stitch done that
+     nobody has worked. Both are only visible as an invariant over a whole walk, which
+     is why this re-runs the whole walk rather than checking a couple of examples.
+  */
+  const framed = {
+    ...chartOf(14, 11, (x, y) => (Math.floor(x / 2) + y) % 4),
+    meta: { border: { sts: 3, rows: 3, rounds: 3 } },
+  }
+  const framedReading = readingFor(framed, { mode: 'rows' })
+  const picture = { w: 14 - 6, h: 11 - 6 }
+
+  check.is(
+    'the reading is the picture rows plus one step per round',
+    framedReading.length,
+    picture.h + 3,
+  )
+  check.is(
+    'the last three steps are the rounds',
+    framedReading.slice(-3).every((entry) => entry.kind === 'round'),
+    true,
+  )
+  check.is(
+    'a picture row is the picture wide, not the chart wide',
+    framedReading[0].total,
+    picture.w,
+  )
+
+  const framedWalk = walk(framed, framedReading)
+  const framedStats = progressStats(framedReading, framedWalk.progress)
+  check.is(
+    'ticking the whole thing through works every stitch of the chart',
+    framedStats.stitchesDone,
+    framed.cells.length,
+  )
+  check.is('and nothing is left over', framedStats.stitchesLeft, 0)
+  check('and it reports itself complete', framedStats.complete)
+
+  let framedMaskTracks = true
+  walk(framed, framedReading, (_before, after) => {
+    const mask = workedMask(framed, framedReading, after, { mode: 'rows' })
+    if (countWorked(mask) !== progressStats(framedReading, after).stitchesDone) framedMaskTracks = false
+  })
+  check('the overlay and the numbers agree on every tick of a bordered chart', framedMaskTracks)
+
+  const framedFinal = workedMask(framed, framedReading, framedWalk.progress, { mode: 'rows' })
+  check.is('every cell is worked at the end', countWorked(framedFinal), framed.cells.length)
+
+  /*
+    Before the picture is finished, not one stitch of the border may be marked done.
+    This is the whole point of the option: somebody who stops halfway has a bare panel
+    and an untouched border, not a half-edged one.
+  */
+  const beforeRounds = { step: picture.h, runsDone: 0 }
+  const midMask = workedMask(framed, framedReading, beforeRounds, { mode: 'rows' })
+  let borderUntouched = true
+  for (let y = 0; y < framed.rows; y++) {
+    for (let x = 0; x < framed.stitches; x++) {
+      const inBorder = x < 3 || y < 3 || x >= framed.stitches - 3 || y >= framed.rows - 3
+      if (inBorder && midMask[y * framed.stitches + x] !== AHEAD) borderUntouched = false
+    }
+  }
+  check('with the picture still going, no border stitch is worked or current', borderUntouched)
+
+  // Stitch numbers still have to match the ones printed along the chart, which count
+  // from the chart's right-hand edge and not from the picture's.
+  const framedRow = framedReading[0]
+  const framedFirst = runRange(framedRow, 0, { mode: 'rows', stitches: framed.stitches, offset: 3 })
+  check.is('a picture row starts past the border, in printed numbers', framedFirst.from, 4)
+  const framedLast = runRange(framedRow, framedRow.runs.length - 1, {
+    mode: 'rows',
+    stitches: framed.stitches,
+    offset: 3,
+  })
+  check.is('and stops before the border on the far side', framedLast.to, framed.stitches - 3)
+
+  const roundEntry = framedReading[framedReading.length - 1]
+  const roundFirst = runRange(roundEntry, 0, { mode: 'rows', stitches: framed.stitches, offset: 3 })
+  check.is('a round is counted from the start of the round', roundFirst.from, 1)
 }

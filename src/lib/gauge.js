@@ -101,6 +101,29 @@ export function formatSize(size, unit = 'in') {
 }
 
 /**
+ * How many rounds a border worked AFTER the picture needs to be about this deep.
+ *
+ * A border worked into the fabric as you go can be any shape you like: it is simply
+ * extra stitches on each row and extra rows top and bottom, so `inchesToStitches` and
+ * `inchesToRows` give it the same depth in inches on both axes.
+ *
+ * A border worked round the finished panel cannot. One round travels the whole way
+ * around, so it adds exactly one stitch of WIDTH at each side and one row of HEIGHT at
+ * the top and bottom — and those two are not the same distance. Asking for 1.5" of
+ * border therefore has one answer, not two, and the honest thing is to pick the round
+ * count that comes closest and then say what it really measures rather than printing
+ * the number that was asked for. The caller does the saying; this does the picking.
+ *
+ * At least one round whenever a border was asked for at all: rounding 0.25" to zero
+ * would silently turn the border off.
+ */
+export function borderRounds(inches, gauge) {
+  if (!(inches > 0)) return 0
+  const perRound = (stitchWidthIn(gauge) + rowHeightIn(gauge)) / 2
+  return Math.max(1, Math.round(inches / perRound))
+}
+
+/**
  * The distance a stitch makes the yarn travel: once across its width, and up and back
  * down its post.
  *

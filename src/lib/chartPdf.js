@@ -14,7 +14,7 @@
 import { inkOn } from './color.js'
 import { createPdf, measureText } from './pdf.js'
 import { cellHeightFor } from './draw.js'
-import { colourChanges, dimensions, encodeC2C, encodeRows, legend } from './pattern.js'
+import { colourChanges, dimensions, legend, readingFor, stepLabel } from './pattern.js'
 
 const MARGIN = 40
 const INK = [30, 34, 38]
@@ -321,18 +321,21 @@ function drawPattern(doc, chart, { mode, startsOnRightSide, key }) {
   const letterFor = new Map(key.map((e) => [e.index, e.letter]))
   const lines = []
 
-  if (mode === 'c2c') {
-    lines.push(['Corner to corner', true])
-    for (const band of encodeC2C(chart)) {
-      const runs = band.runs.map((r) => `${r.count} ${name(r.index)}`).join(', ')
-      lines.push([`Row ${band.row} (${band.phase}, ${band.direction}): ${runs}  (${band.total})`, false])
+  lines.push([mode === 'c2c' ? 'Corner to corner' : 'Worked in rows, from the bottom up', true])
+
+  // A border left until the end is a second section of the same pattern, not a second
+  // pattern: the rounds continue straight on from the last row of the picture.
+  let heading = false
+  for (const entry of readingFor(chart, { mode, startsOnRightSide })) {
+    if (entry.kind === 'round' && !heading) {
+      heading = true
+      lines.push(['Border, worked in rounds around the finished panel', true])
     }
-  } else {
-    lines.push(['Worked in rows, from the bottom up', true])
-    for (const row of encodeRows(chart, { startsOnRightSide })) {
-      const runs = row.runs.map((r) => `${r.count} ${letterFor.get(r.index) ?? '?'} ${name(r.index)}`).join(', ')
-      lines.push([`Row ${row.row} (${row.side}, ${row.direction}): ${runs}  (${row.total})`, false])
-    }
+    const runs = entry.runs
+      .map((r) => `${r.count} ${letterFor.get(r.index) ?? '?'} ${name(r.index)}`)
+      .join(', ')
+    const how = entry.kind === 'round' ? entry.direction : `${entry.phase ?? entry.side}, ${entry.direction}`
+    lines.push([`${stepLabel(entry)} (${how}): ${runs}  (${entry.total})`, false])
   }
 
   const lineHeight = 11

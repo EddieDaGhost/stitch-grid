@@ -51,7 +51,9 @@ gauge, so what you see is the shape you'll end up holding.
 - Zoom, and a counting grid with a heavier line every ten stitches
 - A letter in every cell, on demand — so the chart can be read without telling Sage from
   Moss by eye, which is a guess at arm's length and impossible for some people entirely
-- A border of any width, in inches, added *around* the picture without squashing it
+- A border of any width, in inches, added *around* the picture without squashing it —
+  worked into the fabric as you go, or left until the end and worked in rounds around
+  the finished panel, so nothing of it is stitched until the picture is done
 - Set an exact chart size, and either keep the whole picture, fill the grid by cropping,
   or stretch to fit — filling crops rather than squashing, because squashing turns every
   circle in the photo into an oval, which is the exact thing this tool exists to stop

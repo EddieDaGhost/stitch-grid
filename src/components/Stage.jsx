@@ -235,9 +235,14 @@ export default function Stage({
     <div className="relative flex min-h-0 flex-1 flex-col gap-2">
       <div
         ref={wrapRef}
-        /* Stacked, `flex-1` has no height to be a fraction of, so the stage needs a
-           floor of its own or it collapses behind the panels below it. */
-        className="stage relative flex min-h-[55vh] flex-1 items-center justify-center p-4 lg:min-h-0"
+        /* Stacked, `flex-1` has no height to be a fraction of, so the stage needs a size
+           of its own or it collapses behind the panels below it. A definite one, not a
+           floor: with `min-h` the box grew to whatever the canvas happened to be, so
+           anything that made the chart taller — a wider border, a nudge of the zoom —
+           made the whole PAGE taller under your finger and the browser slid everything
+           to compensate. `.stage` has always been `overflow: auto`; a definite height is
+           what lets it scroll the chart instead of pushing the page around. */
+        className="stage relative flex h-[55vh] min-h-0 shrink-0 items-center justify-center p-4 lg:h-auto lg:shrink lg:flex-1"
         style={fullBleed ? { borderRadius: 0 } : undefined}
       >
         <div className="relative" style={{ width: displayW, height: displayH }}>

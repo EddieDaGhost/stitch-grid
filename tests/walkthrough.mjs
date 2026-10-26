@@ -871,5 +871,105 @@ export default async function run({ page, check, errors, URL }) {
     JSON.stringify(dropped),
   )
 
+  /* ---------------------------------------------------------------------------
+     The border, left until the end.
+
+     Driven through the interface rather than the modules because the thing being
+     claimed is about the ORDER somebody crochets in, and that claim only means
+     anything if making mode actually hands out the rows before the rounds. The unit
+     tests pin the tiling; this pins that the option reaches the person holding a hook.
+  */
+  await page.getByLabel('Design mode').click()
+  await page.waitForTimeout(250)
+  await page.setInputFiles('input[type=file]', upload)
+  await page.waitForSelector('[aria-label="Chart summary"]', { timeout: 30000 })
+  await page.waitForTimeout(700)
+
+  const borderPanel = page.getByRole('region', { name: 'Border' })
+  check(
+    'with no border there is nothing to decide about when to work it',
+    !(await page.getByRole('group', { name: 'When you work it' }).isVisible().catch(() => false)),
+  )
+
+  await page.getByLabel('Border width', { exact: true }).fill('8')
+  await page.waitForTimeout(500)
+  const withBorder = await readChart(page)
+  check(
+    'asking for a border offers the choice of when to work it',
+    await page.getByRole('group', { name: 'When you work it' }).isVisible(),
+  )
+  check(
+    'and starts worked into the fabric, as it always did',
+    /\d+ sts, \d+ rows/.test(await borderPanel.innerText()),
+    (await borderPanel.innerText()).replace(/\s+/g, ' ').slice(0, 120),
+  )
+
+  await page.getByRole('group', { name: 'When you work it' }).getByText('At the end').click()
+  await page.waitForTimeout(600)
+  const asRounds = await readChart(page)
+  const roundsText = (await borderPanel.innerText()).replace(/\s+/g, ' ')
+  check(
+    'choosing the end states a round count instead of two cell counts',
+    /\d+ rounds/i.test(roundsText),
+    roundsText.slice(0, 160),
+  )
+  /*
+    And states what it really measures. A round adds one stitch at the sides and one row
+    top and bottom, so it cannot be the asked-for depth both ways — printing the number
+    from the slider would be the fake-precise answer rule 3 exists to refuse.
+  */
+  check(
+    'and is honest that the two directions differ',
+    /sides/i.test(roundsText) && /top and bottom/i.test(roundsText),
+    roundsText.slice(0, 160),
+  )
+  check(
+    'the band is the same count on both axes, as a round must be',
+    asRounds.stitches - asRounds.rows !== withBorder.stitches - withBorder.rows ||
+      asRounds.stitches !== withBorder.stitches,
+    `${withBorder.stitches}x${withBorder.rows} worked in, ${asRounds.stitches}x${asRounds.rows} in rounds`,
+  )
+
+  // --- and now the half that matters: what you are told to crochet, and when.
+  await page.getByLabel('Make mode').click()
+  await page.waitForTimeout(400)
+  const making = page.getByLabel('Current row')
+  check('making mode still starts at row 1', /Row 1\b/.test(await making.innerText()))
+
+  const stepsText = await page.getByLabel('Progress').innerText()
+  check(
+    'and counts rows and rounds rather than calling them all rows',
+    /rows and rounds/i.test(stepsText),
+    stepsText.replace(/\s+/g, ' ').slice(0, 120),
+  )
+
+  /*
+    Jump to the last step. It must be a ROUND, which is the whole promise of the option:
+    everything the border is made of comes after everything the picture is made of.
+  */
+  const total = Number((await page.getByLabel('Current row').innerText()).match(/of\s+(\d+)/)?.[1] ?? 0)
+  check('the reading has more steps than the picture has rows', total > 0, String(total))
+  const jump = page.getByLabel('Go to row', { exact: true })
+  await jump.fill(String(total))
+  await jump.press('Enter')
+  await page.waitForTimeout(400)
+  check(
+    'the last thing you work is a round of the border',
+    /Round \d+/.test(await making.innerText()),
+    (await making.innerText()).replace(/\s+/g, ' ').slice(0, 80),
+  )
+
+  await jump.fill('1')
+  await jump.press('Enter')
+  await page.waitForTimeout(400)
+  check(
+    'and the first thing you work is a row of the picture',
+    /Row 1\b/.test(await making.innerText()),
+    (await making.innerText()).replace(/\s+/g, ' ').slice(0, 80),
+  )
+
+  await page.getByLabel('Design mode').click()
+  await page.waitForTimeout(250)
+
   check.is('no page errors along the way', errors.join(' | '), '')
 }

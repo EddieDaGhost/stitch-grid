@@ -139,6 +139,11 @@ export function buildChart({ sat, raster, layout, settings, lut }) {
       despeckle: settings.despeckle,
       stretched: layout.stretched,
       padded: layout.padded,
+      /* The border band, so a READING of this chart can tell the picture from its frame.
+         It has to travel on the Chart rather than be re-derived from the settings: the
+         written pattern, the progress tracker and the PDF are all pure functions of a
+         Chart, and a border worked at the end changes the order they work it in. */
+      border: { sts: layout.border.sts, rows: layout.border.rows, rounds: layout.border.rounds ?? 0 },
     },
   }
 }

@@ -174,6 +174,39 @@ export default async function run({ check }) {
   check('A4 uses a different media box', text(a4).includes('/MediaBox [0 0 595.28 841.89]'))
   structural(check, a4, 'a4')
 
+  /*
+    A border worked at the end prints as a second section of the same pattern.
+
+    Worth its own structural pass rather than only a text check: the rounds add lines
+    and therefore pages, and the whole point of this suite is that a document which
+    grows a page still has every cross-reference offset landing on its own object. A
+    pattern that reads correctly inside a file no viewer will open is not a pattern.
+  */
+  const framed = {
+    ...chartOf(24, 20),
+    meta: { border: { sts: 4, rows: 4, rounds: 4 } },
+  }
+  const framedPdf = buildChartPdf(framed, { title: 'Framed' })
+  // Unescaped, because every paren in a PDF literal is written as `\(` — comparing
+  // against the raw bytes would be testing the escaper rather than the pattern.
+  const framedText = text(framedPdf).replace(/\\([()])/g, '$1')
+  check('the printed pattern announces the border section', framedText.includes('worked in rounds'))
+  check('and numbers the rounds', framedText.includes('Round 1 ('))
+  check(
+    'a round says it goes around rather than printing a character no PDF font has',
+    framedText.includes('Round 1 (around)'),
+    framedText.match(/Round 1 \([^)]*\)/)?.[0] ?? 'no round line found',
+  )
+
+  // The picture rows are the picture wide: 24 stitches less four rounds either side.
+  const rowTotals = [...framedText.matchAll(/Row \d+ \((?:RS|WS)[^:]*: .*?\((\d+)\)/g)].map((m) => Number(m[1]))
+  check(
+    'every picture row is the picture wide, not the chart wide',
+    rowTotals.length > 0 && rowTotals.every((n) => n === framed.stitches - 8),
+    `totals seen: ${[...new Set(rowTotals)].join(', ') || 'none'}`,
+  )
+  structural(check, framedPdf, 'border worked at the end')
+
   // --- a one-cell chart is still a valid document
   structural(check, buildChartPdf(chartOf(1, 1, 1), { title: 'Tiny' }), 'single cell')
 

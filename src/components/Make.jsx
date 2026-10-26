@@ -24,11 +24,18 @@ import {
   prevStep,
   runRange,
 } from '../lib/progress.js'
+import { readingArea, stepLabel } from '../lib/pattern.js'
 import { holdScreenAwake, wakeLockSupported } from '../lib/wakelock.js'
 
 export default function Make({ chart, make, setProgress, letters, mode, onRestart }) {
   const { reading, progress, current, next, stats } = make
   const done = isComplete(progress, reading)
+  /* A border left until the end turns the tail of the reading into rounds, so the panel
+     has two kinds of step in it and must not call both of them rows. `offset` is how far
+     the picture starts in from the chart's right-hand edge, which is what keeps the
+     stitch numbers matching the ones printed along the sheet. */
+  const rounds = reading.some((entry) => entry.kind === 'round')
+  const offset = readingArea(chart).x
   const currentRunRef = useRef(null)
   const runListRef = useRef(null)
 
@@ -95,13 +102,14 @@ export default function Make({ chart, make, setProgress, letters, mode, onRestar
       <section className="panel p-4" aria-label="Current row">
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="numeral text-xl font-bold leading-none">
-            Row {current.row}
+            {stepLabel(current)}
             <span className="ml-1.5 text-sm font-medium" style={{ color: 'var(--ink-3)' }}>
               of {stats.steps}
             </span>
           </h2>
           <span className="numeral text-sm font-semibold" style={{ color: 'var(--accent)' }}>
-            {mode === 'c2c' ? current.phase : current.side} {current.direction}
+            {current.kind === 'round' ? 'around' : mode === 'c2c' ? current.phase : current.side}{' '}
+            {current.direction}
           </span>
         </div>
 
@@ -115,7 +123,7 @@ export default function Make({ chart, make, setProgress, letters, mode, onRestar
               run={run}
               colour={chart.palette[run.index]}
               letter={letters[run.index]}
-              range={runRange(current, index, { mode, stitches: chart.stitches })}
+              range={runRange(current, index, { mode, stitches: chart.stitches, offset })}
               state={index < progress.runsDone ? 'done' : index === progress.runsDone ? 'current' : 'ahead'}
               onPick={() => setProgress((p) => ({ step: p.step, runsDone: index }))}
             />
@@ -123,7 +131,7 @@ export default function Make({ chart, make, setProgress, letters, mode, onRestar
         </ol>
 
         <p className="numeral mt-2 text-center text-xs" style={{ color: 'var(--ink-3)' }}>
-          {current.total} stitches in this row
+          {current.total} stitches in this {current.kind === 'round' ? 'round' : 'row'}
         </p>
 
         <div className="mt-3 grid grid-cols-[auto_1fr] gap-2">
@@ -153,7 +161,7 @@ export default function Make({ chart, make, setProgress, letters, mode, onRestar
           aria-label="Skip to the next row"
           onClick={() => setProgress((p) => nextStep(p, reading))}
         >
-          Row {current.row} done
+          {stepLabel(current)} done
           <ArrowRight className="h-4 w-4" />
         </button>
 
@@ -161,7 +169,9 @@ export default function Make({ chart, make, setProgress, letters, mode, onRestar
           <p className="mt-3 border-t pt-3 text-xs leading-relaxed" style={{ borderColor: 'var(--line)', color: 'var(--ink-3)' }}>
             <span className="label">Next</span>{' '}
             <span className="numeral">
-              Row {next.row} ({mode === 'c2c' ? next.phase : next.side} {next.direction}):{' '}
+              {stepLabel(next)} (
+              {next.kind === 'round' ? 'around' : mode === 'c2c' ? next.phase : next.side}{' '}
+              {next.direction}):{' '}
               {next.runs.map((run) => `${run.count} ${chart.palette[run.index]?.name ?? '?'}`).join(', ')}
             </span>
           </p>
@@ -171,7 +181,7 @@ export default function Make({ chart, make, setProgress, letters, mode, onRestar
       <section className="panel p-4" aria-label="Progress">
         <h2 className="section-title">How far in</h2>
         <dl className="numeral mt-3 flex flex-wrap gap-x-6 gap-y-3">
-          <Stat label="Done" value={`${Math.floor(stats.percent)}%`} note={`${stats.stepsDone} of ${stats.steps} rows`} />
+          <Stat label="Done" value={`${Math.floor(stats.percent)}%`} note={`${stats.stepsDone} of ${stats.steps} ${rounds ? 'rows and rounds' : 'rows'}`} />
           <Stat
             label="Stitches"
             value={stats.stitchesDone.toLocaleString()}

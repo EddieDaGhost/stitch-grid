@@ -118,6 +118,18 @@ ask rather than "improving" it.
    reloading for the same reason: a resume that quietly went back to the whole frame
    passes any check that only asks whether a chart appeared.
 
+15. **A border is worked one of two ways, and they are not the same shape.** Worked
+   into the fabric as you go it is extra stitches on each row and extra rows top and
+   bottom, so the two axes are independent and the band is the same depth in inches
+   both ways. Worked round the finished panel at the end it is ROUNDS, and one round
+   adds one stitch at each side and one row top and bottom — different distances. So
+   `border.worked: 'after'` makes the band the same CELL count on both axes and the
+   Border panel stops repeating the number on the slider, stating the two measurements
+   it really produces instead. Offering "at the end" while keeping an 8-by-9 band would
+   be printing an instruction nobody can follow, which is rule 3 with a different hat
+   on. `borderRounds()` in `src/lib/gauge.js` picks the count; the panel says what it
+   came to.
+
 ---
 
 ## Ids are permanent
@@ -170,6 +182,7 @@ src/
 - Changing the crochet maths → `src/lib/gauge.js`
 - Changing what gets printed → `src/lib/chartPdf.js`
 - Changing how you keep your place while crocheting → `src/lib/progress.js`
+- Changing the ORDER a chart is worked in → `readingFor` / `readingArea` in `src/lib/pattern.js`
 - Changing what survives a closed tab → `src/lib/storage.js`
 - Changing how it looks → `src/index.css` (tokens) or the component
 
@@ -199,6 +212,17 @@ everything downstream of `computeLayout` needed no change; off it they are not, 
 them charts the wrong part of the photo without anything throwing. The framing panel draws
 `source.preview` for the same reason — draw `source.raster` there and after a crop the rest
 of the photo is simply gone, with nothing left to widen back into.
+
+**A reading walks an AREA, not always the whole chart.** `readingArea()` is the whole
+chart for every chart whose border is worked in as it goes — which is every chart by
+default — and the picture inside the band when it is not. `readingFor` then appends one
+step per border round. Everything downstream already worked on "a list of steps, each
+with cells and runs", which is why making mode, the progress overlay, the written pattern
+and the PDF all followed a border worked at the end without being told about it. The
+invariant that matters is that the picture steps and the rounds between them still visit
+every cell exactly once: `tests/pattern.mjs` and `tests/progress.mjs` both assert it,
+because a reading that double-counts a cell does not throw, it just quietly tells someone
+their blanket is a different number of stitches than it is.
 
 **The order of the pipeline is load-bearing.** Border and pad cells take their palette
 index *before* quantization and are skipped by the remap and by despeckle, which is why a
@@ -381,6 +405,22 @@ The suites worth knowing about:
   different picture to be opened underneath it. `source.rev` is in the chart cache key for
   the same reason: a refocus is the one thing that changes the cells while every setting
   stays put, so without it the sharper copy never reaches the screen.
+- **The stage needs a definite height, not a minimum.** It has carried `overflow: auto`
+  since the beginning, but with `min-h-[55vh]` and no height there was never anything to
+  scroll: the box simply grew to whatever the canvas was. So anything that made the chart
+  taller — widening the border, nudging the zoom — made the PAGE taller, and below `lg`
+  the browser then slid everything to keep its scroll anchor. Measured at phone size,
+  dragging the border slider moved the page 126px while the finger never left the slider,
+  which reads as the screen sliding around under you. `touch-action: none` was never the
+  problem and was never missing. `tests/tablet.mjs` drags the border slider through CDP
+  touch events and asserts `scrollY` does not move — a mouse drag cannot catch this.
+- **A panel that grows pushes every panel below it.** Same bug, second cause: the Colours
+  panel lists the colours in use and sits ABOVE the Border panel, so adding a border
+  colour grew it and shoved the slider down mid-drag. It is bounded now
+  (`scroll-y max-h-72`, the pattern making mode's run list already used), which also
+  stops a twenty-colour photo from being a thousand pixels of scrolling on a phone. A
+  chart with FEWER colours than the cap can still settle once when the border colour
+  joins the list; that is the chart honestly gaining a colour, not the layout moving.
 - **The summed-area table must be `Float64Array`.** A 1024² image sums past 6×10¹⁰, which
   overflows a uint32 and silently corrupts the bottom-right quadrant.
 - **Crochet row 1 is the BOTTOM row**, and odd rows read the cells array reversed. That

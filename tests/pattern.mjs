@@ -18,7 +18,12 @@ import {
   estimateYarn,
   legend,
   patternText,
+  readingArea,
+  readingFor,
+  roundCells,
   rowSide,
+  stepCells,
+  stepLabel,
 } from '../src/lib/pattern.js'
 import { RESOLVED } from '../src/lib/palette.js'
 
@@ -144,4 +149,113 @@ export default async function run({ check }) {
   const c2cText = patternText(wide, { mode: 'c2c' })
   check('c2c mode changes the written pattern', c2cText.includes('Corner to corner'))
   check('c2c mode still lists every diagonal', c2cText.split('\n').filter((l) => /^Row \d+ \(/.test(l)).length === bigC2C.length)
+
+  /* ---------------------------------------------------------------------------
+     A border worked at the end: the picture first, then rounds around it.
+
+     The thing worth guarding is not the labelling, it is that the two halves of the
+     reading still tile the chart. Making mode trusts that completely — it tots up
+     every step's `total` to know how many stitches the job is, and paints the overlay
+     from each step's cells — so a reading that visits a cell twice, or misses one,
+     reports a blanket somebody is forty hours into as the wrong length and marks the
+     wrong stitches done. A unit test is the only place that is cheap to notice.
+  */
+  const bordered = (rounds) => {
+    const stitches = 9
+    const rowCount = 7
+    const cells = new Uint8Array(stitches * rowCount)
+    // A picture that is NOT one flat colour, so runs differ row to row.
+    for (let y = 0; y < rowCount; y++) {
+      for (let x = 0; x < stitches; x++) cells[y * stitches + x] = (x + y) % 2
+    }
+    return {
+      stitches,
+      rows: rowCount,
+      cells,
+      palette: [RESOLVED[0], RESOLVED[1]],
+      gauge: SC,
+      meta: { border: { sts: rounds, rows: rounds, rounds } },
+    }
+  }
+
+  const framed = bordered(2)
+  const area = readingArea(framed)
+  check.is('the reading area insets by the round count on x', area.x, 2)
+  check.is('and on y', area.y, 2)
+  check.is('leaving the picture width', area.w, 5)
+  check.is('and the picture height', area.h, 3)
+
+  const plain = bordered(0)
+  check.is(
+    'a border worked as you go leaves the area alone',
+    `${readingArea(plain).w}x${readingArea(plain).h}`,
+    '9x7',
+  )
+
+  for (const mode of ['rows', 'c2c']) {
+    const reading = readingFor(framed, { mode })
+    const seen = new Int32Array(framed.cells.length).fill(0)
+    let counted = 0
+    for (const entry of reading) {
+      const cells = stepCells(framed, entry.row, { mode })
+      check.is(
+        `${mode}: every step's cell count matches the total it reports`,
+        cells.length,
+        entry.total,
+      )
+      for (const cell of cells) {
+        seen[cell]++
+        counted++
+      }
+    }
+    check.is(`${mode}: the reading works every stitch of the chart`, counted, framed.cells.length)
+    check(
+      `${mode}: and works each of them exactly once`,
+      seen.every((n) => n === 1),
+      `${seen.filter((n) => n !== 1).length} cells visited the wrong number of times`,
+    )
+
+    // The order is the point of the whole feature: nothing of the border before the
+    // picture is finished, and nothing of the picture after the border has started.
+    const firstRound = reading.findIndex((entry) => entry.kind === 'round')
+    check.is(`${mode}: there is one step per round, at the end`, reading.length - firstRound, 2)
+    check(
+      `${mode}: no border stitch is worked before the picture is done`,
+      reading.slice(0, firstRound).every((entry) => {
+        for (const cell of stepCells(framed, entry.row, { mode })) {
+          const x = cell % framed.stitches
+          const y = Math.floor(cell / framed.stitches)
+          if (x < 2 || y < 2 || x >= 7 || y >= 5) return false
+        }
+        return true
+      }),
+    )
+  }
+
+  // Round 1 hugs the picture and the last round is the outside edge, because that is
+  // the order they are worked: each goes around what is already there.
+  const inner = [...roundCells(framed, 1)].map((c) => c % framed.stitches)
+  const outer = [...roundCells(framed, 2)].map((c) => c % framed.stitches)
+  check.is('round 1 is the inner ring', Math.min(...inner), 1)
+  check.is('the last round is the outside edge', Math.min(...outer), 0)
+  check.is('an inner ring is shorter than the one around it', inner.length < outer.length, true)
+  check.is('the rings between them are the whole border', inner.length + outer.length, 9 * 7 - 5 * 3)
+
+  // A round travels the way row 1 does: right to left along the bottom, then round.
+  const outerCells = [...roundCells(framed, 2)]
+  check.is('a round starts at the bottom right corner', outerCells[0], 6 * 9 + 8)
+  check.is('and moves left along the bottom', outerCells[1], 6 * 9 + 7)
+  check.is('a round has no repeats', new Set(outerCells).size, outerCells.length)
+
+  check.is('a round is labelled a round', stepLabel({ kind: 'round', round: 3 }), 'Round 3')
+  check.is('a row is labelled a row', stepLabel({ kind: 'row', row: 12 }), 'Row 12')
+
+  // The written pattern has to say so too, or the sheet and the screen disagree.
+  const framedText = patternText(framed, { title: 'Framed' })
+  check('the written pattern announces the border section', framedText.includes('worked in rounds'))
+  check('and names a round rather than a row', /^Round 1 \(/m.test(framedText))
+  check(
+    'the picture rows are the picture only',
+    framedText.split('\n').filter((l) => /^Row \d+ \(/.test(l)).length === 3,
+  )
 }

@@ -31,7 +31,7 @@ export const DEFAULT_SETTINGS = {
    *   'stretch' fills the grid by squashing the picture into it
    */
   fit: 'contain',
-  border: { inches: 0, colorId: 'cream' },
+  border: { inches: 0, colorId: 'cream', worked: 'with' },
   padColorId: 'cream',
   subsetId: 'all',
   maxColors: 12,
@@ -95,6 +95,9 @@ export function normalizeSettings(raw) {
     border: {
       inches: clamp(s.border?.inches, 0, 12, 0),
       colorId: VALID_IDS.has(s.border?.colorId) ? s.border.colorId : DEFAULT_SETTINGS.border.colorId,
+      // Anything that isn't the explicit opt-in means worked into the fabric as you go,
+      // so settings saved before this existed keep the border they already had.
+      worked: s.border?.worked === 'after' ? 'after' : 'with',
     },
     padColorId: VALID_IDS.has(s.padColorId) ? s.padColorId : DEFAULT_SETTINGS.padColorId,
     subsetId: SUBSETS.some((x) => x.id === s.subsetId) ? s.subsetId : 'all',
@@ -136,6 +139,9 @@ export function settingsKey(settings, sourceId = '') {
     s.fit,
     s.border.inches,
     s.border.colorId,
+    // In the key because it changes the CELLS: a border worked at the end is a whole
+    // number of rounds, which is a different band from one measured per axis.
+    s.border.worked,
     s.padColorId,
     s.subsetId,
     s.maxColors,

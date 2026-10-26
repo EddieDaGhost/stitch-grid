@@ -3,6 +3,7 @@
  */
 
 import {
+  borderRounds,
   cellAspect,
   finishedSize,
   formatSize,
@@ -135,5 +136,36 @@ export default async function run({ check }) {
     'and double crochet the least of the three',
     yardsPerSquareFoot(HDC) > yardsPerSquareFoot(DC),
     `hdc ${yardsPerSquareFoot(HDC).toFixed(0)} vs dc ${yardsPerSquareFoot(DC).toFixed(0)}`,
+  )
+
+  /* --- a border worked in rounds at the end -------------------------------------
+     A round adds one stitch at the sides and one ROW top and bottom, so unlike a
+     border worked into the fabric it cannot be the same depth both ways. The count is
+     therefore one number, not two, and the only question is which one comes closest.
+  */
+  check.is('no border asked for is no rounds', borderRounds(0, SC), 0)
+  check.is('a negative border is no rounds either', borderRounds(-2, SC), 0)
+  check(
+    'any border at all is at least one round, never rounded away to none',
+    borderRounds(0.05, SC) >= 1,
+    `${borderRounds(0.05, SC)} rounds`,
+  )
+
+  for (const gauge of [SC, HDC, DC]) {
+    const perRound = (stitchWidthIn(gauge) + rowHeightIn(gauge)) / 2
+    for (const inches of [0.5, 1, 1.5, 2, 3, 6]) {
+      const n = borderRounds(inches, gauge)
+      check(
+        `${inches}" is the closest whole number of rounds at ${gauge.stitchesPer4}/${gauge.rowsPer4}`,
+        Math.abs(n * perRound - inches) <= perRound / 2 + 1e-9,
+        `${n} rounds is ${(n * perRound).toFixed(2)}" against ${inches}"`,
+      )
+    }
+  }
+
+  check(
+    'a taller stitch needs fewer rounds for the same depth',
+    borderRounds(3, DC) <= borderRounds(3, SC),
+    `dc ${borderRounds(3, DC)} vs sc ${borderRounds(3, SC)}`,
   )
 }

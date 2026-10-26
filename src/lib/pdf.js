@@ -47,6 +47,8 @@ const TRANSLITERATE = {
   '×': 'x', '÷': '/',
   '←': '<--', '→': '-->', '↑': '^', '↓': 'v',
   '↗': '/', '↙': '\\', '↖': '\\', '↘': '/',
+  // A border round travels all four sides, so it has no single direction to draw.
+  '↺': 'around', '↻': 'around',
   ' ': ' ',
 }
 
